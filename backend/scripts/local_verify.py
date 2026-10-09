@@ -17,31 +17,11 @@ from __future__ import annotations
 
 import json
 import os
-import re
-import shutil
-import subprocess  # nosec B404 - argument list only, never shell=True
 import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, HERE)
-
-
-def _run(cmd: list[str], cwd: str, timeout: int) -> subprocess.CompletedProcess:
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
-                          cwd=cwd)
-
-
-def _summary(output: str) -> tuple[int, int]:
-    """Parse pytest -q counts from the summary line."""
-    passed, failed = 0, 0
-    match = re.search(r"(\d+) passed", output)
-    if match:
-        passed = int(match.group(1))
-    match = re.search(r"(\d+) failed", output)
-    if match:
-        failed = int(match.group(1))
-    return passed, failed
 
 
 def main(argv: list[str]) -> int:
@@ -67,49 +47,45 @@ def main(argv: list[str]) -> int:
         test_content = handle.read()
 
     work = tempfile.mkdtemp(prefix=f"verify-{scan_id}-")
-    venv = os.path.join(work, "venv")
     print(f"work dir: {work}")
-    print("creating venv + installing target requirements (once)…")
-    _run([sys.executable, "-m", "venv", venv], work, 300)
-    pip = os.path.join(venv, "Scripts" if os.name == "nt" else "bin", "pip")
-    vpy = os.path.join(venv, "Scripts" if os.name == "nt" else "bin", "python")
+    print("creating venv + installing target requirements (once)...")
 
     from tools.git_cloner import _git_bin  # noqa: E402
     from tools.patch_apply import PatchBlock, apply_blocks  # noqa: E402
+    from tools.sandbox import (create_venv, install_requirements,  # noqa: E402
+                               run_cmd, run_tests_venv)
+
+    vpy = create_venv(work)
 
     def fresh_clone(name: str) -> str:
         dest = os.path.join(work, name)
-        _run([_git_bin(), "clone", "--depth", "1", repo_url, dest],
-             work, 300)
+        run_cmd([_git_bin(), "clone", "--depth", "1", repo_url, dest],
+                work, 300)
         with open(os.path.join(dest, test_file), "w", encoding="utf-8",
                   newline="") as handle:
             handle.write(test_content)
         return dest
 
     original = fresh_clone("original")
-    req = os.path.join(original, "requirements.txt")
-    if os.path.isfile(req):
-        proc = _run([pip, "install", "-r", req], work, 600)
-        if proc.returncode != 0:
-            print("requirements install failed:\n" + proc.stderr[-2000:])
-            return 1
-    _run([pip, "install", "pytest"], work, 600)
+    try:
+        install_requirements(vpy, original)
+    except RuntimeError as exc:
+        print(str(exc)[-2000:])
+        return 1
 
     rows: list[tuple[str, int, int, str, str]] = []
 
-    red = _run([vpy, "-m", "pytest", "-q", "-p", "no:cacheprovider",
-                test_file], original, 600)
-    passed, failed = _summary(red.stdout + red.stderr)
-    ok = "YES" if red.returncode != 0 else "NO"
-    rows.append(("exploit on ORIGINAL", passed, failed, "FAIL", ok))
+    red = run_tests_venv(original, "exploit_before", vpy, selector=test_file)
+    ok = "YES" if red["returncode"] != 0 else "NO"
+    rows.append(("exploit on ORIGINAL", red["passed"], red["failed"],
+                 "FAIL", ok))
 
     patched = fresh_clone("patched")
     apply_blocks(patched, [PatchBlock(**b) for b in blocks])
-    green = _run([vpy, "-m", "pytest", "-q", "-p", "no:cacheprovider"],
-                 patched, 600)
-    passed, failed = _summary(green.stdout + green.stderr)
-    ok = "YES" if green.returncode == 0 else "NO"
-    rows.append(("suite on PATCHED", passed, failed, "PASS", ok))
+    green = run_tests_venv(patched, "after", vpy)
+    ok = "YES" if green["returncode"] == 0 else "NO"
+    rows.append(("suite on PATCHED", green["passed"], green["failed"],
+                 "PASS", ok))
 
     print(f"{'phase':<22} {'passed':>6} {'failed':>6}  "
           f"{'expected':<8} {'OK?'}")
