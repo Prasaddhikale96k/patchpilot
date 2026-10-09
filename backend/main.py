@@ -313,6 +313,11 @@ class ScanSummary(BaseModel):
     started_at: float
 
 
+class RemediateRequest(BaseModel):
+    scan_id: str = Field(min_length=1, max_length=64)
+    target_hint: Optional[str] = Field(default=None, max_length=32)
+
+
 # ══════════════════════════════════════════════════════════════
 #  Background task
 # ══════════════════════════════════════════════════════════════
@@ -360,8 +365,9 @@ async def _run_scan(repo_url: str, scan_id: str, create_pr: bool = False,
     except TimeoutError:
         logger.error("Scan %s exceeded %ss timeout", scan_id, SCAN_TIMEOUT_SECS)
         _scans[scan_id]["status"] = "error"
+        _scans[scan_id]["error"] = f"Scan timed out after {int(SCAN_TIMEOUT_SECS)}s"
         await queue.put({"type": "error", "scan_id": scan_id,
-                         "message": f"Scan timed out after {int(SCAN_TIMEOUT_SECS)}s"})
+                         "message": _scans[scan_id]["error"]})
 
     except LLMUnavailableError as exc:
         # An operational fault, not a bug. Collapsing it into "internal error"
@@ -369,17 +375,20 @@ async def _run_scan(repo_url: str, scan_id: str, create_pr: bool = False,
         # the browser, and only the server logs could tell them apart.
         logger.error("Scan %s could not reach a language model: %s", scan_id, exc)
         _scans[scan_id]["status"] = "error"
+        _scans[scan_id]["error"] = (f"{exc.reason} The scan could not run. "
+                                    "Nothing was written to scan history.")
         await queue.put({"type": "error", "scan_id": scan_id,
                          "kind": "llm_unavailable",
-                         "message": f"{exc.reason} The scan could not run. "
-                                    "Nothing was written to scan history."})
+                         "message": _scans[scan_id]["error"]})
 
     except Exception:
         logger.exception("Scan %s crashed", scan_id)
         _scans[scan_id]["status"] = "error"
+        _scans[scan_id]["error"] = ("Scan failed due to an internal error. "
+                                    "See server logs.")
         await queue.put({"type": "error", "scan_id": scan_id,
                          "kind": "internal",
-                         "message": "Scan failed due to an internal error. See server logs."})
+                         "message": _scans[scan_id]["error"]})
 
     finally:
         cleanup_repo(scan_id)  # remove cloned repo, if any
@@ -410,6 +419,7 @@ async def start_scan(req: ScanRequest) -> ScanResponse:
         "queue": asyncio.Queue(),
         "report": None,
         "status": "starting",
+        "error": None,
         "repo_url": req.repo_url,
         "started_at": time.time(),
     }
@@ -420,6 +430,92 @@ async def start_scan(req: ScanRequest) -> ScanResponse:
     return ScanResponse(scan_id=scan_id, ws_url=f"/ws/{scan_id}", status="starting")
 
 
+async def _run_remediation_task(run_id: str, state: dict) -> None:
+    """Stream the small remediation graph over the same WS format as scans."""
+    from agents.remediation.loop import stream_remediation
+
+    queue: asyncio.Queue = _scans[run_id]["queue"]
+    accumulated: dict = dict(state)
+    try:
+        async for node_name, node_output in stream_remediation(state, run_id):
+            for key, value in node_output.items():
+                if key == "agent_logs":
+                    accumulated.setdefault("agent_logs", [])
+                    accumulated["agent_logs"].extend(value)
+                else:
+                    accumulated[key] = value
+            await queue.put({
+                "type": "update",
+                "node": node_name,
+                "logs": node_output.get("agent_logs", []),
+                "status": node_output.get("status", ""),
+                "scan_id": run_id,
+            })
+
+        test_reports = accumulated.get("test_reports", {}) or {}
+        report = {
+            "scan_id": run_id,
+            "repo_url": accumulated.get("repo_url", ""),
+            "remediation": {
+                "status": accumulated.get("remediation_status", "failed"),
+                "target_vuln": accumulated.get("target_vuln"),
+                "attempts": accumulated.get("attempts", 0),
+                "test_verdict": accumulated.get("test_verdict"),
+                "pr_url": accumulated.get("pr_url"),
+                "phases": {phase: {
+                    "passed": rep.get("passed", 0),
+                    "total": rep.get("total", 0),
+                    "failed": rep.get("failed", 0),
+                } for phase, rep in test_reports.items()
+                    if isinstance(rep, dict)},
+            },
+        }
+        _scans[run_id]["report"] = report
+        _scans[run_id]["status"] = "done"
+        await queue.put({"type": "done", "scan_id": run_id, "report": report})
+    except Exception as exc:
+        logger.exception("Remediation %s crashed", run_id)
+        _scans[run_id]["status"] = "error"
+        _scans[run_id]["error"] = str(exc) or "Remediation failed."
+        await queue.put({"type": "error", "scan_id": run_id,
+                         "message": _scans[run_id]["error"]})
+    finally:
+        cleanup_repo(run_id)
+        await queue.put(None)
+
+
+@app.post("/api/remediate", response_model=ScanResponse, status_code=201)
+async def start_remediation(req: RemediateRequest) -> ScanResponse:
+    """Re-run coder→tester→PR-creator from a saved state_after_fix.json."""
+    from agents.remediation.loop import fresh_remediation_state
+    from tools.run_artifacts import load_state_snapshot
+
+    try:
+        snapshot = load_state_snapshot(req.scan_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404,
+                            detail=f"No saved state for scan {req.scan_id}")
+    if not snapshot.get("repo_url"):
+        raise HTTPException(status_code=422,
+                            detail="Snapshot has no repo_url")
+    n = 1 + sum(1 for sid in _scans if sid.startswith(f"{req.scan_id}-r"))
+    run_id = f"{req.scan_id}-r{n}"
+    state = fresh_remediation_state(snapshot, run_id,
+                                    target_hint=req.target_hint)
+    _scans[run_id] = {
+        "queue": asyncio.Queue(),
+        "report": None,
+        "status": "starting",
+        "error": None,
+        "repo_url": snapshot.get("repo_url", ""),
+        "started_at": time.time(),
+    }
+    asyncio.create_task(_run_remediation_task(run_id, state))
+    logger.info("Remediation %s started from scan %s (hint=%s)",
+                run_id, req.scan_id, req.target_hint)
+    return ScanResponse(scan_id=run_id, ws_url=f"/ws/{run_id}", status="starting")
+
+
 @app.get("/api/report/{scan_id}")
 async def get_report(scan_id: str) -> dict:
     scan = _scans.get(scan_id)
@@ -428,7 +524,10 @@ async def get_report(scan_id: str) -> dict:
     if scan["status"] in ("starting", "scanning", "analyzing", "exploiting", "patching", "reporting"):
         raise HTTPException(status_code=202, detail=f"Scan in progress: {scan['status']}")
     if scan["status"] == "error":
-        raise HTTPException(status_code=500, detail="Scan failed — check WebSocket logs")
+        # Fail fast: a crashed node is visible here immediately with the
+        # message, instead of hanging the caller on 202s.
+        return {"status": "error",
+                "detail": scan.get("error") or "Scan failed — check server logs"}
     return scan["report"]
 
 

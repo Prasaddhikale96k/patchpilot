@@ -1214,11 +1214,23 @@ Output only a valid JSON array. Be specific and technical. No markdown."""),
 #  Node: Fix Suggester
 # ══════════════════════════════════════════════════════════════
 
+def _snapshot_after_fix(state: ScanState, patches: list) -> None:
+    """Persist the post-fix_suggester state for /api/remediate re-runs."""
+    try:
+        from tools.run_artifacts import save_state
+        snapshot = dict(state)
+        snapshot["patches"] = patches
+        save_state(state.get("scan_id", "unknown"), snapshot)
+    except Exception:
+        logger.warning("fix_suggester: state snapshot failed", exc_info=True)
+
+
 def fix_suggester_node(state: ScanState) -> dict:
     """Generates code patches for the most severe vulnerabilities."""
     targets = [v for v in state["vulnerabilities"] if v["severity"] in ("CRITICAL", "HIGH", "MEDIUM")]
 
     if not targets:
+        _snapshot_after_fix(state, [])
         return {
             "patches": [],
             "status": "reporting",
@@ -1386,6 +1398,7 @@ Output only valid JSON. No markdown."""
 
     logs.append(f"[FixSuggester] {len(patches)}/{len(targets)} patches generated")
 
+    _snapshot_after_fix(state, patches)
     return {
         "patches": patches,
         "status": "reporting",
