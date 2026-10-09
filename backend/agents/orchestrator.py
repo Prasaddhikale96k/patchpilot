@@ -641,7 +641,7 @@ def _scan_github(state: ScanState) -> dict:
     """Clone repo and run Semgrep + Bandit static analysis."""
     from tools.bandit_runner import run_bandit
     from tools.git_cloner import clone_repo, detect_tech_stack
-    from tools.semgrep_runner import run_semgrep
+    import tools.semgrep_runner as semgrep_runner
 
     try:
         repo_path = clone_repo(state["repo_url"], state["scan_id"])
@@ -663,29 +663,50 @@ def _scan_github(state: ScanState) -> dict:
 
         is_python = "python" in [l.lower() for l in tech_stack.get("languages", [])]
 
-        def _timed_bandit() -> tuple[list, float]:
+        def _timed_bandit() -> tuple[list, float, str | None]:
             start = _time.perf_counter()
-            result = run_bandit(repo_path) if is_python else []
-            return result, _time.perf_counter() - start
+            try:
+                result = run_bandit(repo_path) if is_python else []
+            except Exception as exc:
+                return [], _time.perf_counter() - start, str(exc)
+            return result, _time.perf_counter() - start, None
 
-        def _timed_semgrep() -> tuple[list, float]:
+        def _timed_semgrep() -> tuple[list, float, str | None]:
             start = _time.perf_counter()
-            result = run_semgrep(repo_path)
-            return result, _time.perf_counter() - start
+            try:
+                result = semgrep_runner.run_semgrep(repo_path)
+            except Exception as exc:
+                return [], _time.perf_counter() - start, str(exc)
+            return result, _time.perf_counter() - start, None
 
         with _Pool(max_workers=2) as _ex:
             _futures = [_ex.submit(_timed_bandit), _ex.submit(_timed_semgrep)]
-            (bandit_results, bandit_secs), (semgrep_results, semgrep_secs) = \
+            (bandit_results, bandit_secs, bandit_err), \
+                (semgrep_results, semgrep_secs, semgrep_err) = \
                 [f.result() for f in _futures]
 
-        if is_python:
+        # One failed scanner must not sink the other: continue with whatever
+        # succeeded and say so. Only both failing is a scan error.
+        if bandit_err and semgrep_err:
+            raise RuntimeError(
+                f"Bandit failed: {bandit_err}; Semgrep failed: {semgrep_err}")
+
+        if is_python and not bandit_err:
             raw_findings.extend(bandit_results)
             logs.append(f"[Scanner] Bandit: {len(bandit_results)} issues ({bandit_secs:.1f}s)")
+        elif bandit_err:
+            logs.append(f"[Scanner] Bandit failed: {bandit_err} — continuing with Semgrep results")
         else:
             logs.append("[Scanner] Bandit: skipped (no Python detected)")
 
-        raw_findings.extend(semgrep_results)
-        logs.append(f"[Scanner] Semgrep: {len(semgrep_results)} issues ({semgrep_secs:.1f}s)")
+        if not semgrep_err:
+            if semgrep_runner.last_pull:
+                logs.append("[Scanner] Pulling Semgrep Docker image (first run only)…")
+            raw_findings.extend(semgrep_results)
+            logs.append(f"[Scanner] Semgrep ({semgrep_runner.last_mode}): "
+                        f"{len(semgrep_results)} issues ({semgrep_secs:.1f}s)")
+        else:
+            logs.append(f"[Scanner] Semgrep failed: {semgrep_err} — continuing with Bandit results")
 
         # Test code does unsafe things deliberately, so findings against it are
         # mostly noise: a self-scan produced 231 findings, 218 of them in tests,

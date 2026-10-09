@@ -29,6 +29,8 @@ class TestParallelScanners:
 
         monkeypatch.setattr(bandit_runner, "run_bandit", fake_bandit)
         monkeypatch.setattr(semgrep_runner, "run_semgrep", fake_semgrep)
+        monkeypatch.setattr(semgrep_runner, "last_mode", "native")
+        monkeypatch.setattr(semgrep_runner, "last_pull", False)
         start = time.perf_counter()
         result = orchestrator._scan_github({"repo_url": "https://github.com/a/b",
                                             "scan_id": "t"})
@@ -48,10 +50,12 @@ class TestParallelScanners:
         result, _ = self._scan(monkeypatch, tmp_path, 0, 0)
         assert any("Bandit: 1 issues (" in line and line.rstrip().endswith("s)")
                    for line in result["agent_logs"])
-        assert any("Semgrep: 1 issues (" in line and line.rstrip().endswith("s)")
+        assert any("Semgrep (native): 1 issues (" in line
+                   and line.rstrip().endswith("s)")
                    for line in result["agent_logs"])
 
-    def test_scanner_failure_still_errors(self, monkeypatch, tmp_path):
+    def test_semgrep_failure_continues_with_bandit(self, monkeypatch, tmp_path):
+        """A dead Semgrep must not sink Bandit findings (prompt 01b)."""
         import tools.git_cloner as git_cloner
         import tools.bandit_runner as bandit_runner
         import tools.semgrep_runner as semgrep_runner
@@ -59,7 +63,32 @@ class TestParallelScanners:
         monkeypatch.setattr(git_cloner, "clone_repo", lambda *a: str(tmp_path))
         monkeypatch.setattr(git_cloner, "detect_tech_stack",
                             lambda p: {"languages": ["python"]})
-        monkeypatch.setattr(bandit_runner, "run_bandit", lambda p: [])
+        monkeypatch.setattr(bandit_runner, "run_bandit", lambda p: [
+            {"source": "bandit", "file": "b.py", "line": 1,
+             "severity": "MEDIUM", "description": "kept"},
+        ])
+
+        def boom(path):
+            raise RuntimeError("semgrep is not installed or not on PATH")
+
+        monkeypatch.setattr(semgrep_runner, "run_semgrep", boom)
+        result = orchestrator._scan_github({"repo_url": "https://github.com/a/b",
+                                            "scan_id": "t"})
+        assert result["status"] == "analyzing"
+        assert [f["file"] for f in result["raw_findings"]] == ["b.py"]
+        assert any("Semgrep failed" in line and "Bandit results" in line
+                   for line in result["agent_logs"])
+
+    def test_both_scanners_failing_still_errors(self, monkeypatch, tmp_path):
+        import tools.git_cloner as git_cloner
+        import tools.bandit_runner as bandit_runner
+        import tools.semgrep_runner as semgrep_runner
+
+        monkeypatch.setattr(git_cloner, "clone_repo", lambda *a: str(tmp_path))
+        monkeypatch.setattr(git_cloner, "detect_tech_stack",
+                            lambda p: {"languages": ["python"]})
+        monkeypatch.setattr(bandit_runner, "run_bandit",
+                            lambda p: (_ for _ in ()).throw(RuntimeError("bandit down")))
 
         def boom(path):
             raise RuntimeError("semgrep is not installed or not on PATH")

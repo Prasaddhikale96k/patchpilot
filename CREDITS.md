@@ -15,7 +15,8 @@ The original provides the scan → analyze → exploit-reasoning → fix-suggest
 _To be filled as we go (Prompts 02–08):_
 
 - [x] Prompt 01 — Local setup, architecture notes (`docs/ARCHITECTURE_NOTES.md`), ExamGuard hidden behind `NEXT_PUBLIC_ENABLE_EXAMGUARD`, this file.
-- [x] Prompt 00a — Multi-provider LLM router (Groq multi-key rotation + Gemini + OpenRouter + Ollama), `strip_reasoning`, per-provider semaphores + `llm_pool.map`, parallel Semgrep+Bandit, fix-queue ranking + retry escalation, `scripts/llm_check.py`, `/api/llm/status`. Remediation-loop wiring (parallel workers, Docker-once, progress events) plugs in with prompts 03–06.
+- [x] Prompt 00a — Multi-provider LLM router (Groq multi-key rotation + Gemini + OpenRouter + Ollama), `strip_reasoning`, per-provider semaphores + `llm_pool.map`, parallel Semgrep+Bandit, fix-queue ranking + retry escalation, `scripts/llm_check.py`, `/api/llm/status`. Remediation-loop wiring plugs in with prompts 03–06.
+- [x] Prompt 01b — Windows support (`backend/run.ps1`, `dev.ps1`, `docs/WINDOWS.md`), Semgrep via Docker (`SEMGREP_MODE=auto|native|docker`, rules-cache volume), key tooling (`scripts/merge_env.py`, `scripts/check_keys.py`), first verified end-to-end scan (Vulnerable-Flask-App: Bandit 18 + Semgrep 26 → 35 vulns → 10 patches → CRITICAL 100/100).
 - [ ] Prompt 02 — `vulnbank` demo target repo (separate repo).
 - [ ] Prompt 03 — SecureCoder node (multi-line patch + exploit test).
 - [ ] Prompt 04 — Docker sandbox + Tester node (red → green proof).

@@ -18,6 +18,12 @@ def _bandit_bin() -> str:
     venv_bin = os.path.join(os.path.dirname(sys.executable), "bandit")
     if os.path.isfile(venv_bin):
         return venv_bin
+    if os.name == "nt":
+        # Windows console scripts are bandit.exe; extensionless lookup misses
+        # them when .venv\Scripts is not on PATH (e.g. run.ps1 without activate).
+        venv_exe = venv_bin + ".exe"
+        if os.path.isfile(venv_exe):
+            return venv_exe
     resolved = shutil.which("bandit")
     if not resolved:
         raise RuntimeError("bandit is not installed or not on PATH")
