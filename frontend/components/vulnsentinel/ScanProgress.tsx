@@ -36,9 +36,11 @@ interface ScanProgressProps {
 const AGENT_PIPELINE: { key: string; label: string; description: string }[] = [
   { key: "orchestrator",     label: "Orchestrator",     description: "Plans scan strategy" },
   { key: "scanner",          label: "Scanner Agent",    description: "Clones repo · runs Semgrep + Bandit" },
+  { key: "logic_auditor",    label: "Logic Auditor",    description: "LLM audit for broken access control & path traversal" },
   { key: "vuln_analyzer",    label: "Vuln Analyzer",    description: "Maps findings to OWASP & CVEs" },
   { key: "exploit_reasoner", label: "Exploit Reasoner", description: "Assesses real-world exploitability" },
   { key: "fix_suggester",    label: "Fix Suggester",    description: "Generates code patches" },
+  { key: "secure_coder",     label: "Secure Coder",     description: "Writes patch + exploit test (auto-fix runs only)" },
   { key: "report_generator", label: "Report Generator", description: "Calculates the risk score · compiles the report" },
 ]
 
@@ -47,9 +49,11 @@ const AGENT_PIPELINE: { key: string; label: string; description: string }[] = [
 const NODE_ORDER = [
   "orchestrator",
   "scanner",
+  "logic_auditor",
   "vuln_analyzer",
   "exploit_reasoner",
   "fix_suggester",
+  "secure_coder",
   "report_generator",
 ]
 

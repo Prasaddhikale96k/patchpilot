@@ -63,7 +63,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -252,6 +252,12 @@ async def _janitor() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     janitor = asyncio.create_task(_janitor())
+    from agents.orchestrator import _graph
+    try:
+        nodes = sorted(getattr(_graph, "nodes", {}).keys())
+    except Exception:
+        nodes = []
+    logger.info("Serving graph nodes: %s", nodes)
     yield
     janitor.cancel()
     _scans.clear()
@@ -279,6 +285,8 @@ app.add_middleware(
 
 class ScanRequest(BaseModel):
     repo_url: str = Field(min_length=4, max_length=2048)
+    create_pr: bool = False
+    target_hint: Optional[str] = Field(default=None, max_length=32)
 
     @field_validator("repo_url")
     @classmethod
@@ -309,12 +317,14 @@ class ScanSummary(BaseModel):
 #  Background task
 # ══════════════════════════════════════════════════════════════
 
-async def _run_scan(repo_url: str, scan_id: str) -> None:
+async def _run_scan(repo_url: str, scan_id: str, create_pr: bool = False,
+                  target_hint: Optional[str] = None) -> None:
     queue: asyncio.Queue = _scans[scan_id]["queue"]
     accumulated: dict = {}
 
     try:
-        state = _initial_state(repo_url, scan_id)
+        state = _initial_state(repo_url, scan_id, create_pr=create_pr,
+                               target_hint=target_hint)
         config = {"configurable": {"thread_id": scan_id}}
 
         async with asyncio.timeout(SCAN_TIMEOUT_SECS):
@@ -403,7 +413,9 @@ async def start_scan(req: ScanRequest) -> ScanResponse:
         "repo_url": req.repo_url,
         "started_at": time.time(),
     }
-    asyncio.create_task(_run_scan(req.repo_url, scan_id))
+    asyncio.create_task(_run_scan(req.repo_url, scan_id,
+                                  create_pr=req.create_pr,
+                                  target_hint=req.target_hint))
     logger.info("Scan %s started for %s", scan_id, req.repo_url)
     return ScanResponse(scan_id=scan_id, ws_url=f"/ws/{scan_id}", status="starting")
 

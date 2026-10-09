@@ -14,10 +14,10 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 
 // ── VulnSentinel ───────────────────────────────────────────────
 
-export const startScan = (repo_url: string) =>
+export const startScan = (repo_url: string, opts?: { create_pr?: boolean; target_hint?: string }) =>
   req<{ scan_id: string; ws_url: string; status: string }>("/api/scan", {
     method: "POST",
-    body: JSON.stringify({ repo_url }),
+    body: JSON.stringify({ repo_url, create_pr: opts?.create_pr ?? false, target_hint: opts?.target_hint ?? null }),
   })
 
 export const getReport = (scan_id: string) =>

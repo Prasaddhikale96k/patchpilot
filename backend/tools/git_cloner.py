@@ -59,12 +59,20 @@ def clone_repo(repo_url: str, scan_id: str) -> str:
 
 
 def cleanup_repo(scan_id: str) -> None:
-    """Delete the cloned repo for a scan, if it exists. Never raises."""
+    """Delete the cloned repo (plus any <dest>_work_* copies) for a scan.
+
+    Never raises."""
     dest = _repo_dest(scan_id)
     try:
         if os.path.isdir(dest):
             shutil.rmtree(dest, ignore_errors=True)
             logger.info("Cleaned up cloned repo %s", dest)
+        parent = os.path.dirname(dest)
+        prefix = os.path.basename(dest) + "_work_"
+        for entry in os.listdir(parent):
+            if entry.startswith(prefix):
+                shutil.rmtree(os.path.join(parent, entry), ignore_errors=True)
+                logger.info("Cleaned up work copy %s", entry)
     except Exception:
         logger.warning("Failed to clean up %s", dest, exc_info=True)
 

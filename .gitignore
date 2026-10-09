@@ -22,6 +22,9 @@ tsconfig.tsbuildinfo
 # Repos cloned during scans
 /tmp/vulnsentinel_*/
 
+# PatchForge run artifacts (diffs, transcripts, exploit tests per scan)
+backend/runs/
+
 # OS
 .DS_Store
 Thumbs.db

@@ -3,11 +3,12 @@ VulnSentinel — LangGraph Orchestrator
 Coordinates all security scanning agents in a directed acyclic pipeline.
 
 Graph shape:
-  orchestrator → scanner → vuln_analyzer → exploit_reasoner → fix_suggester → report_generator → END
-                         ↘                ↘
-                       (no findings)   (no vulns)
-                               ↘         ↘
-                              report_generator → END
+  orchestrator → scanner → logic_auditor → vuln_analyzer → exploit_reasoner
+      → fix_suggester → secure_coder → report_generator → END
+                          ↘                ↘                 ↘
+                        (no findings)   (no vulns)      (no auto-PR target)
+                                ↘         ↘                 ↘
+                               report_generator → END
 """
 
 from __future__ import annotations
@@ -25,6 +26,8 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 
 from .llm_router import active_model_label, invoke_llm, llm_pool
+from .remediation.logic_auditor import logic_auditor_node
+from .remediation.secure_coder import secure_coder_node
 from .state import ScanState
 
 logger = logging.getLogger(__name__)
@@ -1486,6 +1489,20 @@ def _route_after_scanner(state: ScanState) -> Literal["vuln_analyzer", "report_g
     return "vuln_analyzer"
 
 
+def _route_after_fix_suggester(state: ScanState) -> Literal["secure_coder", "report_generator"]:
+    """Prompt 03 (temporary): secure_coder runs when an auto-PR was asked for
+    on a repo scan with at least one non-website vulnerability."""
+    if not state.get("create_pr"):
+        return "report_generator"
+    if (state.get("tech_stack", {}) or {}).get("type") == "website":
+        return "report_generator"
+    for vuln in state.get("vulnerabilities", []) or []:
+        path = (vuln.get("file") or "")
+        if path and not path.startswith(("http://", "https://")):
+            return "secure_coder"
+    return "report_generator"
+
+
 def _route_after_vuln_analyzer(state: ScanState) -> Literal["exploit_reasoner", "report_generator"]:
     if not state.get("vulnerabilities"):
         return "report_generator"
@@ -1501,15 +1518,18 @@ def build_graph() -> StateGraph:
 
     graph.add_node("orchestrator", orchestrator_node)
     graph.add_node("scanner", scanner_node)
+    graph.add_node("logic_auditor", logic_auditor_node)
     graph.add_node("vuln_analyzer", vuln_analyzer_node)
     graph.add_node("exploit_reasoner", exploit_reasoner_node)
     graph.add_node("fix_suggester", fix_suggester_node)
+    graph.add_node("secure_coder", secure_coder_node)
     graph.add_node("report_generator", report_generator_node)
 
     graph.set_entry_point("orchestrator")
 
     graph.add_edge("orchestrator", "scanner")
-    graph.add_conditional_edges("scanner", _route_after_scanner, {
+    graph.add_edge("scanner", "logic_auditor")
+    graph.add_conditional_edges("logic_auditor", _route_after_scanner, {
         "vuln_analyzer": "vuln_analyzer",
         "report_generator": "report_generator",
     })
@@ -1518,7 +1538,11 @@ def build_graph() -> StateGraph:
         "report_generator": "report_generator",
     })
     graph.add_edge("exploit_reasoner", "fix_suggester")
-    graph.add_edge("fix_suggester", "report_generator")
+    graph.add_conditional_edges("fix_suggester", _route_after_fix_suggester, {
+        "secure_coder": "secure_coder",
+        "report_generator": "report_generator",
+    })
+    graph.add_edge("secure_coder", "report_generator")
     graph.add_edge("report_generator", END)
 
     return graph.compile(checkpointer=MemorySaver())
@@ -1531,11 +1555,15 @@ _graph = build_graph()
 #  Public API
 # ══════════════════════════════════════════════════════════════
 
-def _initial_state(repo_url: str, scan_id: Optional[str] = None) -> ScanState:
+def _initial_state(repo_url: str, scan_id: Optional[str] = None,
+                   create_pr: bool = False,
+                   target_hint: Optional[str] = None) -> ScanState:
     sid = scan_id or str(uuid.uuid4())[:8]
     return ScanState(
         repo_url=repo_url,
         scan_id=sid,
+        create_pr=create_pr,
+        target_hint=(target_hint.strip() if target_hint else None),
         repo_path="",
         tech_stack={},
         raw_findings=[],
@@ -1546,6 +1574,15 @@ def _initial_state(repo_url: str, scan_id: Optional[str] = None) -> ScanState:
         status="starting",
         errors=[],
         not_assessed="",
+        target_vuln=None,
+        work_dir="",
+        code_patch=None,
+        attempts=0,
+        feedback=[],
+        review=None,
+        test_reports={},
+        pr_url=None,
+        remediation_status="skipped",
         agent_logs=[f"[Orchestrator] Initializing scan {sid} for {repo_url}"],
     )
 

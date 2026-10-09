@@ -39,6 +39,8 @@ class ScanState(TypedDict):
     # ── Input ──────────────────────────────────────────────
     repo_url: str
     scan_id: str
+    create_pr: bool                # from request; False → original behaviour
+    target_hint: Optional[str]     # demo control: CWE id or VULN id to fix
 
     # ── Scanner output ─────────────────────────────────────
     repo_path: str
@@ -63,6 +65,18 @@ class ScanState(TypedDict):
     # they mean "nothing was looked at", which is not the same result and must
     # never be reported as one.
     not_assessed: str
+
+    # ── PatchForge remediation (prompts 03–06; skipped when create_pr False)
+    target_vuln: Optional[Dict[str, Any]]  # the ONE vulnerability for auto-PR
+    work_dir: str                   # patched working copy, current attempt
+    code_patch: Optional[Dict[str, Any]]   # rationale/blocks/diff/test_file/…
+    attempts: int
+    # reviewer/tester feedback for the next coder attempt (replaced, not added)
+    feedback: List[str]
+    review: Optional[Dict[str, Any]]
+    test_reports: Dict[str, Any]    # {"baseline":…, "exploit_before":…, "after":…}
+    pr_url: Optional[str]
+    remediation_status: str         # skipped|running|pr_opened|verified_no_pr|failed
 
     # Accumulates across nodes; streamed live to frontend via WebSocket
     agent_logs: Annotated[List[str], operator.add]
