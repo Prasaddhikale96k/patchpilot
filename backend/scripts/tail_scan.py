@@ -18,6 +18,14 @@ import sys
 TIMEOUT_SECS = 1500.0
 
 
+def _safe_stdout() -> None:
+    """Windows consoles (cp1252) crash on fancy unicode — replace, don't die."""
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+
 async def tail(host: str, port: int, scan_id: str) -> int:
     import websockets
 
@@ -64,6 +72,7 @@ def main() -> int:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
     args = parser.parse_args()
+    _safe_stdout()
     return asyncio.run(tail(args.host, args.port, args.scan_id))
 
 
