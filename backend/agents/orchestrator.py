@@ -24,7 +24,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 
-from .llm_router import active_model_label, invoke_llm
+from .llm_router import active_model_label, invoke_llm, llm_pool
 from .state import ScanState
 
 logger = logging.getLogger(__name__)
@@ -655,14 +655,37 @@ def _scan_github(state: ScanState) -> dict:
 
         raw_findings: list[dict] = []
 
-        if "python" in [l.lower() for l in tech_stack.get("languages", [])]:
-            bandit_results = run_bandit(repo_path)
-            raw_findings.extend(bandit_results)
-            logs.append(f"[Scanner] Bandit: {len(bandit_results)} issues")
+        # Prompt 00a: Semgrep and Bandit run concurrently (ThreadPoolExecutor;
+        # both are blocking subprocess calls, so threads are the right tool).
+        # Findings format and order are unchanged: Bandit first, then Semgrep.
+        import time as _time
+        from concurrent.futures import ThreadPoolExecutor as _Pool
 
-        semgrep_results = run_semgrep(repo_path)
+        is_python = "python" in [l.lower() for l in tech_stack.get("languages", [])]
+
+        def _timed_bandit() -> tuple[list, float]:
+            start = _time.perf_counter()
+            result = run_bandit(repo_path) if is_python else []
+            return result, _time.perf_counter() - start
+
+        def _timed_semgrep() -> tuple[list, float]:
+            start = _time.perf_counter()
+            result = run_semgrep(repo_path)
+            return result, _time.perf_counter() - start
+
+        with _Pool(max_workers=2) as _ex:
+            _futures = [_ex.submit(_timed_bandit), _ex.submit(_timed_semgrep)]
+            (bandit_results, bandit_secs), (semgrep_results, semgrep_secs) = \
+                [f.result() for f in _futures]
+
+        if is_python:
+            raw_findings.extend(bandit_results)
+            logs.append(f"[Scanner] Bandit: {len(bandit_results)} issues ({bandit_secs:.1f}s)")
+        else:
+            logs.append("[Scanner] Bandit: skipped (no Python detected)")
+
         raw_findings.extend(semgrep_results)
-        logs.append(f"[Scanner] Semgrep: {len(semgrep_results)} issues")
+        logs.append(f"[Scanner] Semgrep: {len(semgrep_results)} issues ({semgrep_secs:.1f}s)")
 
         # Test code does unsafe things deliberately, so findings against it are
         # mostly noise: a self-scan produced 231 findings, 218 of them in tests,
@@ -1181,6 +1204,10 @@ Output only valid JSON. No markdown."""
 
     static_host = state.get("tech_stack", {}).get("static_host")
 
+    # Prompt 00a: one LLM call per vulnerability, fanned out over the
+    # load-balanced pool (llm_pool.map preserves order, so patches[] and the
+    # log lines come out exactly as the sequential loop produced them).
+    jobs: list[tuple[dict, object, str, bool]] = []  # (vuln, source, prompt, unreadable)
     for vuln in targets:
         # When the host cannot set response headers, the remediation is a known
         # fact about the platform, not something to ask a model about. Left to
@@ -1210,11 +1237,17 @@ Output only valid JSON. No markdown."""
         else:
             unreadable = not is_website
 
-        response = invoke_llm([
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=prompt),
-        ])
+        jobs.append((vuln, source, prompt, unreadable))
 
+    message_lists = [
+        [SystemMessage(content=system_prompt), HumanMessage(content=prompt)]
+        for (_, _, prompt, _) in jobs
+    ]
+    # fn is resolved from this module's globals at call time, so tests that
+    # monkeypatch orchestrator.invoke_llm keep working.
+    replies = llm_pool.map(message_lists, fn=invoke_llm) if jobs else []
+
+    for (vuln, source, _, unreadable), response in zip(jobs, replies):
         patch = _parse_json(response.content, None)
         if isinstance(patch, list):
             # Asked for one object, answered with an array. Left alone, a list

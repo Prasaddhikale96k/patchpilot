@@ -7,6 +7,12 @@ langchain-groq>=0.1.0
 langchain-ollama>=0.1.0
 langchain-core>=0.2.0
 
+# Multi-provider LLM (prompt 00a): official OpenAI-compatible client for
+# Gemini (generativelanguage.googleapis.com/v1beta/openai) + OpenRouter.
+# Also provides the Groq SDK's httpx transport (no bare-urllib Cloudflare 1010).
+groq>=0.30.0
+openai>=1.30.0
+
 # Static analysis
 bandit>=1.7.9
 semgrep>=1.75.0

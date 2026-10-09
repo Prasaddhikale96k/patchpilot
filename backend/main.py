@@ -679,6 +679,17 @@ async def osiris_cve(cve_id: str) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+@app.get("/api/llm/status")
+async def llm_status() -> dict:
+    """
+    Multi-provider LLM health (prompt 00a): per-provider configuration,
+    per-model state (ok / cooldown / disabled + reason) and the remaining
+    OpenRouter free budget. Never contains key material.
+    """
+    from agents.llm_router import get_llm_status
+    return get_llm_status()
+
+
 @app.get("/health")
 async def health() -> dict:
     from agents.llm_router import get_active_backend, get_system_profile

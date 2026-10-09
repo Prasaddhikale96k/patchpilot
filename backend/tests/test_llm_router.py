@@ -264,4 +264,9 @@ class TestRetiredModel:
         with pytest.raises(llm_router.LLMUnavailableError):
             llm_router.invoke_llm([])
 
-        assert calls["n"] == 1
+        # Multi-model chain (prompt 00a): each configured model is tried
+        # exactly once and then disabled — never retried. With the default
+        # three Groq models that is 3 calls total, 1 per model.
+        assert calls["n"] == len(llm_router._groq_models()) == 3
+        for model in llm_router._groq_models():
+            assert model in llm_router._disabled
