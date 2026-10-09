@@ -75,6 +75,7 @@ class ScanState(TypedDict):
     feedback: List[str]
     review: Optional[Dict[str, Any]]
     test_reports: Dict[str, Any]    # {"baseline":…, "exploit_before":…, "after":…}
+    test_verdict: Optional[str]     # verified | failed | error (tester node)
     pr_url: Optional[str]
     remediation_status: str         # skipped|running|pr_opened|verified_no_pr|failed
 

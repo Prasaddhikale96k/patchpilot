@@ -4,10 +4,10 @@ Coordinates all security scanning agents in a directed acyclic pipeline.
 
 Graph shape:
   orchestrator → scanner → logic_auditor → vuln_analyzer → exploit_reasoner
-      → fix_suggester → secure_coder → report_generator → END
-                          ↘                ↘                 ↘
-                        (no findings)   (no vulns)      (no auto-PR target)
-                                ↘         ↘                 ↘
+      → fix_suggester → secure_coder → tester → pr_creator → report_generator
+                          ↘                ↘         ↘ (retry loop ≤3)
+                        (no findings)   (no vulns)  (failed, attempts left)
+                                ↘         ↘         ↘
                                report_generator → END
 """
 
@@ -27,7 +27,9 @@ from langgraph.graph import END, StateGraph
 
 from .llm_router import active_model_label, invoke_llm, llm_pool
 from .remediation.logic_auditor import logic_auditor_node
+from .remediation.pr_creator import pr_creator_node
 from .remediation.secure_coder import match_hint, secure_coder_node
+from .remediation.tester import tester_node
 from .state import ScanState
 
 logger = logging.getLogger(__name__)
@@ -1582,6 +1584,17 @@ def _route_after_vuln_analyzer(state: ScanState) -> Literal["exploit_reasoner", 
     return "exploit_reasoner"
 
 
+def _route_after_tester(state: ScanState) -> Literal["pr_creator", "secure_coder", "report_generator"]:
+    """Prompt 04b: verified → PR placeholder; failed + attempts left → retry
+    the coder with feedback; otherwise finish at the report."""
+    from .remediation.fix_queue import max_fix_attempts
+    if state.get("test_verdict") == "verified":
+        return "pr_creator"
+    if (state.get("attempts", 0) or 0) < max_fix_attempts():
+        return "secure_coder"
+    return "report_generator"
+
+
 # ══════════════════════════════════════════════════════════════
 #  Graph assembly
 # ══════════════════════════════════════════════════════════════
@@ -1596,6 +1609,8 @@ def build_graph() -> StateGraph:
     graph.add_node("exploit_reasoner", exploit_reasoner_node)
     graph.add_node("fix_suggester", fix_suggester_node)
     graph.add_node("secure_coder", secure_coder_node)
+    graph.add_node("tester", tester_node)
+    graph.add_node("pr_creator", pr_creator_node)
     graph.add_node("report_generator", report_generator_node)
 
     graph.set_entry_point("orchestrator")
@@ -1615,7 +1630,13 @@ def build_graph() -> StateGraph:
         "secure_coder": "secure_coder",
         "report_generator": "report_generator",
     })
-    graph.add_edge("secure_coder", "report_generator")
+    graph.add_edge("secure_coder", "tester")
+    graph.add_conditional_edges("tester", _route_after_tester, {
+        "pr_creator": "pr_creator",
+        "secure_coder": "secure_coder",
+        "report_generator": "report_generator",
+    })
+    graph.add_edge("pr_creator", "report_generator")
     graph.add_edge("report_generator", END)
 
     return graph.compile(checkpointer=MemorySaver())
@@ -1654,6 +1675,7 @@ def _initial_state(repo_url: str, scan_id: Optional[str] = None,
         feedback=[],
         review=None,
         test_reports={},
+        test_verdict=None,
         pr_url=None,
         remediation_status="skipped",
         agent_logs=[f"[Orchestrator] Initializing scan {sid} for {repo_url}"],

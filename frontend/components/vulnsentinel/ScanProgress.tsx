@@ -41,6 +41,7 @@ const AGENT_PIPELINE: { key: string; label: string; description: string }[] = [
   { key: "exploit_reasoner", label: "Exploit Reasoner", description: "Assesses real-world exploitability" },
   { key: "fix_suggester",    label: "Fix Suggester",    description: "Generates code patches" },
   { key: "secure_coder",     label: "Secure Coder",     description: "Writes patch + exploit test (auto-fix runs only)" },
+  { key: "tester",           label: "Tester",           description: "Docker red-green verification (auto-fix runs only)" },
   { key: "report_generator", label: "Report Generator", description: "Calculates the risk score · compiles the report" },
 ]
 
@@ -54,6 +55,7 @@ const NODE_ORDER = [
   "exploit_reasoner",
   "fix_suggester",
   "secure_coder",
+  "tester",
   "report_generator",
 ]
 
