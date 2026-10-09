@@ -32,6 +32,13 @@ const modules = [
 ]
 
 export default function HomePage() {
+  // PS1 focus: ExamGuard code stays in the repo but is hidden from the home
+  // page unless explicitly enabled. Set NEXT_PUBLIC_ENABLE_EXAMGUARD=true
+  // in .env.local to show it again.
+  const showExamGuard = process.env.NEXT_PUBLIC_ENABLE_EXAMGUARD === "true"
+  const visibleModules = modules.filter(
+    (mod) => mod.href !== "/exam" || showExamGuard,
+  )
   return (
     <main className="min-h-screen flex flex-col items-center justify-center px-6 py-16">
       {/* Logo */}
@@ -50,8 +57,8 @@ export default function HomePage() {
       </div>
 
       {/* Module cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-3xl">
-        {modules.map((mod) => (
+      <div className={`grid grid-cols-1 gap-6 w-full ${visibleModules.length > 1 ? "md:grid-cols-2 max-w-3xl" : "max-w-xl"}`}>
+        {visibleModules.map((mod) => (
           <Link
             key={mod.href}
             href={mod.href}

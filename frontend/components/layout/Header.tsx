@@ -6,10 +6,14 @@ import { usePathname } from "next/navigation"
 export default function Header() {
   const pathname = usePathname()
 
+  // PS1 focus: ExamGuard route stays in the repo but is hidden from the
+  // header unless explicitly enabled via NEXT_PUBLIC_ENABLE_EXAMGUARD=true.
+  const showExamGuard = process.env.NEXT_PUBLIC_ENABLE_EXAMGUARD === "true"
+
   const navItems = [
     { href: "/", label: "Home" },
     { href: "/scan", label: "Scan" },
-    { href: "/exam", label: "Exam" },
+    ...(showExamGuard ? [{ href: "/exam", label: "Exam" }] : []),
   ]
 
   return (
