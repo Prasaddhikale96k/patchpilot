@@ -118,7 +118,7 @@ def main(argv: list[str]) -> int:
     for phase, p, f, expected, ok in rows:
         print(f"{phase:<22} {p:>6} {f:>6}  {expected:<8} {ok}")
         all_ok = all_ok and ok == "YES"
-    print("red→green proven." if all_ok else "NOT proven — see phases above.")
+    print("red->green proven." if all_ok else "NOT proven - see phases above.")
     return 0 if all_ok else 1
 
 

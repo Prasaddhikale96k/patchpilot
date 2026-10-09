@@ -18,6 +18,10 @@ deterministic.
 ## Exploit test rules (strict)
 
 - Use the project's own test client and fixtures (see the example test).
+- Copy the example test's import lines EXACTLY (e.g. `from .conftest import
+  login` when the tests directory is a package). Never invent a different
+  import path such as bare `from conftest import` — the test must be
+  collectable by pytest, not just correct-looking.
 - Assert the SECURE behaviour:
   - SQLi payload `' OR '1'='1` must NOT return other users' rows;
   - user A requesting user B's object id must get 403 (or 404 if the app
