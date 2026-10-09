@@ -27,7 +27,7 @@ from langgraph.graph import END, StateGraph
 
 from .llm_router import active_model_label, invoke_llm, llm_pool
 from .remediation.logic_auditor import logic_auditor_node
-from .remediation.secure_coder import secure_coder_node
+from .remediation.secure_coder import match_hint, secure_coder_node
 from .state import ScanState
 
 logger = logging.getLogger(__name__)
@@ -145,6 +145,35 @@ _MAX_PATCH_TARGETS = int(os.getenv("MAX_PATCH_TARGETS", "10"))
 # How many findings fit in one enrichment prompt. The rest are still reported,
 # with the scanner's own severity and description.
 _MAX_ENRICHED_FINDINGS = int(os.getenv("MAX_ENRICHED_FINDINGS", "25"))
+
+# FAST_SCAN=1 (default) + a target_hint on the scan: the LLM-heavy stages
+# (analyzer enrichment, reasoner, fix suggester) process only the hinted
+# vulnerability plus the top 4 by severity (max 5 total) on a cheap pinned
+# model. The report still lists every finding; only LLM cost is bounded.
+_FAST_MODEL = "groq:openai/gpt-oss-20b"
+
+
+def _fast_scan_targets(vulns: list[dict], target_hint: str | None) -> list | None:
+    """Max-5 shortlist (hint match first, then severity) or None when inactive."""
+    if not target_hint or os.getenv("FAST_SCAN", "1").strip() != "1":
+        return None
+    ranked = sorted(vulns, key=lambda v: (
+        _SEVERITY_RANK.get((v.get("severity") or "").upper(), 99),
+        v.get("file", ""), v.get("line", 0)))
+    picked, seen = [], set()
+    for vuln in ranked:
+        if match_hint(vuln, target_hint):
+            picked.append(vuln)
+            seen.add(id(vuln))
+    for vuln in ranked:
+        if id(vuln) not in seen:
+            picked.append(vuln)
+    return picked[:5]
+
+
+def _fast_model_kw(shortlist) -> dict:
+    """Pin the cheap model for fast-scan steps; {} keeps default routing."""
+    return {"model": _FAST_MODEL} if shortlist is not None else {}
 
 # ── Risk scoring ──────────────────────────────────────────────
 # The risk score used to be whatever number the model wrote, and it did not
@@ -947,7 +976,19 @@ def vuln_analyzer_node(state: ScanState) -> dict:
     # never shown to the model, so they must not be counted as findings it
     # dropped.
     other_findings = [f for f in state["raw_findings"] if f.get("type") != "port_exposure"]
-    sent_to_llm = other_findings[:_MAX_ENRICHED_FINDINGS]
+    # FAST_SCAN with a target_hint: deterministic mapping still covers every
+    # finding, but the LLM enriches only the hinted vuln + top 4 by severity.
+    # Baseline order matches other_findings order, so index i ↔ finding i.
+    _baseline_for_fast = _vulns_from_raw_findings(other_findings)
+    fast_shortlist = _fast_scan_targets(_baseline_for_fast,
+                                        state.get("target_hint"))
+    fast_ids = {id(v) for v in fast_shortlist} if fast_shortlist else set()
+    if fast_shortlist is None:
+        sent_to_llm = other_findings[:_MAX_ENRICHED_FINDINGS]
+    else:
+        sent_to_llm = [f for i, f in enumerate(other_findings[:_MAX_ENRICHED_FINDINGS])
+                       if id(_baseline_for_fast[i]) in fast_ids]
+    model_kw = _fast_model_kw(fast_shortlist)
     findings_json = json.dumps(sent_to_llm, indent=2)
     owasp_ref = get_owasp_context()
 
@@ -976,7 +1017,7 @@ Severity guide: CRITICAL = direct RCE/SQLi/auth bypass, HIGH = exploitable with 
 MEDIUM = exploitable with moderate effort or requires chaining, LOW = hardening/best-practice.
 Output only a valid JSON array. No markdown."""),
         HumanMessage(content=f"Analyze these raw findings:\n{findings_json}"),
-    ])
+    ], **model_kw)
 
     llm_vulns = _parse_json(response.content, [])
     if isinstance(llm_vulns, dict):
@@ -996,7 +1037,7 @@ Output only a valid JSON array. No markdown."""),
     # The scanner's output is the finding set. The model enriches it; it does
     # not get to decide what was found. Previously its array *was* the result,
     # so a finding it forgot to copy simply vanished from the report.
-    baseline = _vulns_from_raw_findings(other_findings)
+    baseline = _baseline_for_fast
     analyzed, merge_stats = _merge_llm_enrichment(
         baseline, llm_vulns, enrichable=len(sent_to_llm)
     )
@@ -1024,6 +1065,10 @@ Output only a valid JSON array. No markdown."""),
         f"[VulnAnalyzer] Severity breakdown: {severity_counts}",
         f"[VulnAnalyzer] OWASP categories identified: {', '.join(sorted(owasp_cats)) or 'none'}",
     ]
+    if fast_shortlist is not None:
+        logs.append(f"[VulnAnalyzer] FAST_SCAN: enriched "
+                    f"{len(sent_to_llm)}/{len(other_findings)} findings "
+                    f"(hint '{state.get('target_hint')}') on {_FAST_MODEL}")
     if port_vulns:
         logs.append(f"[VulnAnalyzer] Port exposures: {len(port_vulns)} open ports mapped to CVEs/CWEs")
     if merge_stats["severity_kept"]:
@@ -1083,6 +1128,20 @@ def exploit_reasoner_node(state: ScanState) -> dict:
             "agent_logs": ["[ExploitReasoner] No HIGH/CRITICAL findings — skipping."],
         }
 
+    fast_shortlist = _fast_scan_targets(state.get("vulnerabilities", []),
+                                        state.get("target_hint"))
+    model_kw = _fast_model_kw(fast_shortlist)
+    if fast_shortlist is not None:
+        keep = {v.get("id") for v in fast_shortlist}
+        targets = [v for v in targets if v.get("id") in keep]
+    if not targets:
+        return {
+            "exploits": [],
+            "status": "patching",
+            "agent_logs": ["[ExploitReasoner] FAST_SCAN shortlist has no "
+                           "HIGH/CRITICAL findings — skipping."],
+        }
+
     from tools.owasp_data import get_owasp_context
     owasp_ref = get_owasp_context()
 
@@ -1103,7 +1162,7 @@ Return a JSON array. Each object must have:
 }}
 Output only a valid JSON array. Be specific and technical. No markdown."""),
         HumanMessage(content=f"Reason about exploitability:\n{json.dumps(targets, indent=2)}"),
-    ])
+    ], **model_kw)
 
     parsed = _parse_json(response.content, [])
     if isinstance(parsed, dict):
@@ -1168,6 +1227,16 @@ def fix_suggester_node(state: ScanState) -> dict:
     # would otherwise mean 40 sequential calls: minutes of wall time on a local
     # model, and enough requests to trip a free-tier cloud rate limit. Patch the
     # most severe findings first and cap the rest.
+    fast_shortlist = _fast_scan_targets(state.get("vulnerabilities", []),
+                                        state.get("target_hint"))
+    model_kw = _fast_model_kw(fast_shortlist)
+    if fast_shortlist is not None:
+        keep = {v.get("id") for v in fast_shortlist}
+        targets = [v for v in targets if v.get("id") in keep]
+        logs_fast = (f"[FixSuggester] FAST_SCAN: {len(targets)} findings "
+                     f"(hint '{state.get('target_hint')}') on {_FAST_MODEL}")
+    else:
+        logs_fast = ""
     total_targets = len(targets)
     targets = sorted(
         targets, key=lambda v: _SEVERITY_RANK.get(v.get("severity"), 99)
@@ -1175,6 +1244,8 @@ def fix_suggester_node(state: ScanState) -> dict:
 
     patches = []
     logs = []
+    if logs_fast:
+        logs.append(logs_fast)
     if total_targets > len(targets):
         logs.append(
             f"[FixSuggester] {total_targets} patchable findings — generating "
@@ -1269,7 +1340,9 @@ Output only valid JSON. No markdown."""
     ]
     # fn is resolved from this module's globals at call time, so tests that
     # monkeypatch orchestrator.invoke_llm keep working.
-    replies = llm_pool.map(message_lists, fn=invoke_llm) if jobs else []
+    replies = llm_pool.map(
+        message_lists,
+        fn=lambda m: invoke_llm(m, **model_kw)) if jobs else []
 
     for (vuln, source, _, unreadable), response in zip(jobs, replies):
         patch = _parse_json(response.content, None)
