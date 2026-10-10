@@ -1,0 +1,78 @@
+{
+  "_demo": true,
+  "model": "qwen/qwen3.8-27b",
+  "scan_id": "demo-vulnbank",
+  "repo_url": "https://github.com/Prasaddhikale96k/vulnbank",
+  "tech_stack": { "languages": ["Python"], "frameworks": ["Flask"] },
+  "summary": {
+    "executive_summary": "Demo data: vulnbank has critical SQL injection and command injection. The SQL injection fix was proven in Docker.",
+    "risk_score": 78,
+    "key_recommendations": ["Use parameterized queries everywhere", "Enforce object ownership checks on invoices", "Normalise and confine file download paths"],
+    "overall_risk": "high",
+    "note": "Demo data. Scanners contributed 11 findings, the Logic Auditor 2; the five most important are listed."
+  },
+  "vulnerabilities": [
+    { "id": "V-001", "file": "app.py", "line": 112, "severity": "critical", "category": "CWE-89 SQL Injection", "description": "The /search route concatenates the q parameter into a SQL string, allowing arbitrary queries.", "source": "semgrep" },
+    { "id": "V-002", "file": "app.py", "line": 148, "severity": "high", "category": "CWE-639 IDOR", "description": "/invoices/<id> returns any invoice without checking that it belongs to the signed-in user.", "source": "llm-audit" },
+    { "id": "V-003", "file": "app.py", "line": 171, "severity": "high", "category": "CWE-22 Path Traversal", "description": "/download joins a user-supplied filename onto the exports directory without normalising it.", "source": "llm-audit" },
+    { "id": "V-004", "file": "config.py", "line": 9, "severity": "medium", "category": "CWE-798 Hardcoded Secret", "description": "A secret key is committed in source.", "source": "bandit" },
+    { "id": "V-005", "file": "admin.py", "line": 34, "severity": "critical", "category": "CWE-78 Command Injection", "description": "The admin ping tool passes the host field to a shell.", "source": "bandit" }
+  ],
+  "exploits": [],
+  "patches": [],
+  "total_findings": 13,
+  "assessed": true,
+  "errors": [],
+  "remediation": {
+    "status": "verified",
+    "outcome": "verified",
+    "verified": true,
+    "applied_to_repository": false,
+    "target_vuln": { "id": "V-001", "file": "app.py", "line": 112, "severity": "critical", "category": "CWE-89", "description": "SQL injection in /search" },
+    "attempts": 1,
+    "max_attempts": 3,
+    "patch": {
+      "rationale": "Replace string concatenation with a parameterized query and validate the input length.",
+      "diff": "--- a/app.py\n+++ b/app.py\n@@ -110,5 +110,6 @@\n def search():\n     q = request.args.get('q', '')\n-    rows = db.execute(\"SELECT * FROM products WHERE name LIKE '%\" + q + \"%'\").fetchall()\n+    q = q[:100]\n+    rows = db.execute(\"SELECT * FROM products WHERE name LIKE ?\", (f'%{q}%',)).fetchall()\n     return render_template('search.html', rows=rows)\n",
+      "files_changed": ["app.py"],
+      "test_file": "tests/exploits/test_cwe89.py",
+      "lines_added": 2,
+      "lines_removed": 1
+    },
+    "review": {
+      "approved": true,
+      "checks": [
+        { "name": "No nosec/skip", "passed": true, "detail": "No suppression comments were added." },
+        { "name": "Tests not deleted", "passed": true, "detail": "All 22 baseline tests are still present." },
+        { "name": "Parameterized query used", "passed": true, "detail": "The query now uses a bound parameter." },
+        { "name": "Input validated", "passed": true, "detail": "Input length is capped before use." },
+        { "name": "No hardcoded bypass", "passed": true, "detail": "No special-cased payloads." }
+      ],
+      "llm_summary": "APPROVED",
+      "llm_issues": [],
+      "root_cause_fixed": true,
+      "security_score": 9,
+      "feedback_for_coder": []
+    },
+    "test_verdict": "verified",
+    "tests": {
+      "baseline": { "total": 22, "passed": 22, "failed": 0, "errors": 0, "skipped": 0, "returncode": 0, "timed_out": false, "sandbox": "docker: no network, 1 CPU, 1 GB RAM", "duration_s": 6.4, "failed_tests": [] },
+      "exploit_before": { "total": 1, "passed": 0, "failed": 1, "errors": 0, "skipped": 0, "returncode": 1, "timed_out": false, "sandbox": "docker: no network, 1 CPU, 1 GB RAM", "duration_s": 2.1, "failed_tests": ["test_sqli_exploit: Exploit succeeded against vulnerable endpoint - bug proven"] },
+      "after": { "total": 23, "passed": 23, "failed": 0, "errors": 0, "skipped": 0, "returncode": 0, "timed_out": false, "sandbox": "docker: no network, 1 CPU, 1 GB RAM", "duration_s": 6.9, "failed_tests": [] }
+    },
+    "regressions": [],
+    "last_feedback": [],
+    "pr": {
+      "requested": true,
+      "status": "created",
+      "reason": "Pull request opened (demo placeholder).",
+      "url": "https://github.com/Prasaddhikale96k/vulnbank/pull/1",
+      "number": 1,
+      "branch": "patchforge/cwe-89-search",
+      "base": "main",
+      "commit": null
+    },
+    "pr_url": "https://github.com/Prasaddhikale96k/vulnbank/pull/1",
+    "artifacts": []
+  }
+}

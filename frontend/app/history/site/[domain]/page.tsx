@@ -6,9 +6,9 @@ import { getDomainHistory, compareScans, deleteScanHistory, type ScanHistoryReco
 
 const SEV_COLORS: Record<string, string> = {
   critical: "text-sentinel-red",
-  high:     "text-orange-400",
-  medium:   "text-yellow-400",
-  low:      "text-blue-400",
+  high:     "text-orange-300",
+  medium:   "text-yellow-300",
+  low:      "text-blue-300",
 }
 
 const RISK_PILL: Record<string, string> = {
@@ -62,20 +62,20 @@ function TrendChart({ scans }: { scans: ScanHistoryRecord[] }) {
               <line
                 x1={padX} x2={W - padX}
                 y1={toY(v)} y2={toY(v)}
-                stroke="#1e293b" strokeWidth="0.5"
+                stroke="#1F2833" strokeWidth="0.5"
               />
-              <text x={padX - 1} y={toY(v) + 1} fill="#475569" fontSize="4" textAnchor="end">{v}</text>
+              <text x={padX - 1} y={toY(v) + 1} fill="#5E5747" fontSize="4" textAnchor="end">{v}</text>
             </g>
           ))}
           {/* Fill */}
-          <polygon points={fillPts} fill="#00d4ff" fillOpacity="0.06" />
+          <polygon points={fillPts} fill="#60A5FA" fillOpacity="0.06" />
           {/* Line */}
-          <polyline points={pts} fill="none" stroke="#00d4ff" strokeWidth="1.5" strokeLinejoin="round"/>
+          <polyline points={pts} fill="none" stroke="#60A5FA" strokeWidth="1.5" strokeLinejoin="round"/>
           {/* Dots */}
           {sorted.map((s, i) => (
             <circle key={i} cx={toX(i)} cy={toY(s.risk_score)} r="2.5"
-                    fill={s.risk_score >= 75 ? "#ff3366" : s.risk_score >= 50 ? "#fb923c" : s.risk_score >= 25 ? "#facc15" : "#00ff88"}
-                    stroke="#0a0a0f" strokeWidth="1"/>
+                    fill={s.risk_score >= 75 ? "#F87171" : s.risk_score >= 50 ? "#FB923C" : s.risk_score >= 25 ? "#A16207" : "#10B981"}
+                    stroke="#11161B" strokeWidth="1"/>
           ))}
         </svg>
       </div>
@@ -103,7 +103,7 @@ function ComparePanel({ comparison }: { comparison: ScanComparison }) {
       {/* Score delta */}
       <div className="flex items-center gap-4">
         <div className="text-center">
-          <div className="text-2xl font-bold font-mono text-slate-300">{scan_a.risk_score}</div>
+          <div className="text-2xl font-bold font-mono text-ink-soft">{scan_a.risk_score}</div>
           <div className="text-xs text-sentinel-muted">{scan_a.scan_date}</div>
         </div>
         <div className="flex-1 flex flex-col items-center">
@@ -116,7 +116,7 @@ function ComparePanel({ comparison }: { comparison: ScanComparison }) {
           <div className="w-full h-px bg-sentinel-border mt-2" />
         </div>
         <div className="text-center">
-          <div className="text-2xl font-bold font-mono text-slate-300">{scan_b.risk_score}</div>
+          <div className="text-2xl font-bold font-mono text-ink-soft">{scan_b.risk_score}</div>
           <div className="text-xs text-sentinel-muted">{scan_b.scan_date}</div>
         </div>
       </div>
@@ -202,14 +202,14 @@ export default function DomainHistoryPage({ params }: { params: { domain: string
   const sortedForChart = [...scans].reverse()
 
   return (
-    <div className="min-h-screen bg-sentinel-bg text-slate-200 flex flex-col">
+    <div className="min-h-screen bg-sentinel-bg text-ink flex flex-col">
       <header className="sticky top-0 z-10 shrink-0 flex items-center gap-3 px-5 py-3
                           border-b border-sentinel-border bg-sentinel-surface">
-        <a href="/history" className="text-sentinel-muted hover:text-white transition-colors text-sm">
+        <a href="/history" className="text-sentinel-muted hover:text-ink transition-colors text-sm">
           ← History
         </a>
         <span className="text-sentinel-border">·</span>
-        <span className="text-sm font-semibold text-white truncate max-w-xs" title={domain}>{domain}</span>
+        <span className="text-sm font-semibold text-ink truncate max-w-xs" title={domain}>{domain}</span>
 
         {latest && (
           <div className="ml-auto flex items-center gap-3">
@@ -243,9 +243,9 @@ export default function DomainHistoryPage({ params }: { params: { domain: string
 
           {notice && (
             <div className={`flex items-start gap-3 rounded-xl border px-4 py-3 text-sm ${
-              notice.kind === "blocked"    ? "border-orange-500/30 bg-orange-500/10 text-orange-200" :
-              notice.kind === "unresolved" ? "border-red-500/30 bg-red-500/10 text-red-200" :
-                                             "border-cyan-500/30 bg-cyan-500/10 text-cyan-100"}`}>
+              notice.kind === "blocked"    ? "border-orange-500/30 bg-orange-500/10 text-orange-300" :
+              notice.kind === "unresolved" ? "border-red-500/30 bg-red-500/10 text-red-300" :
+                                             "border-cyan-500/30 bg-cyan-500/10 text-cyan-300"}`}>
               <span className="font-mono text-xs uppercase tracking-wide shrink-0 pt-0.5">
                 {notice.kind}
               </span>
@@ -288,8 +288,8 @@ export default function DomainHistoryPage({ params }: { params: { domain: string
                         </span>
                         <span className={`text-xs font-semibold font-mono ${
                           s.risk_score >= 75 ? "text-sentinel-red"
-                            : s.risk_score >= 50 ? "text-orange-400"
-                            : s.risk_score >= 25 ? "text-yellow-400" : "text-sentinel-green"
+                            : s.risk_score >= 50 ? "text-orange-300"
+                            : s.risk_score >= 25 ? "text-yellow-300" : "text-sentinel-green"
                         }`}>{s.risk_score}/100</span>
 
                         {/* Delta vs previous scan */}
@@ -336,7 +336,7 @@ export default function DomainHistoryPage({ params }: { params: { domain: string
                             window.scrollTo({ top: 0, behavior: "smooth" })
                           }}
                           className="text-xs px-3 py-1.5 rounded-lg border border-sentinel-border text-sentinel-muted
-                                     hover:text-white hover:border-slate-500 transition-colors font-medium">
+                                     hover:text-ink hover:border-slate-500 transition-colors font-medium">
                           vs prev
                         </button>
                       )}

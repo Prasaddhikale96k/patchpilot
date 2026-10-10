@@ -2,12 +2,13 @@
 
 import { useEffect, useState, useMemo } from "react"
 import { useRouter } from "next/navigation"
+import Header from "@/components/layout/Header"
 import { listHistoryDomains, type DomainHistory } from "@/lib/api"
 
 const RISK_COLOR: Record<string, string> = {
   CRITICAL: "text-sentinel-red",
-  HIGH:     "text-orange-400",
-  MEDIUM:   "text-yellow-400",
+  HIGH:     "text-orange-300",
+  MEDIUM:   "text-yellow-300",
   LOW:      "text-sentinel-green",
   UNKNOWN:  "text-sentinel-muted",
 }
@@ -35,7 +36,7 @@ function Sparkline({ scores }: { scores: number[] }) {
   const last = scores[scores.length - 1]
   const first = scores[0]
   const improving = last < first
-  const color = improving ? "#00ff88" : last > first ? "#ff3366" : "#64748b"
+  const color = improving ? "#0B7A4B" : last > first ? "#C2185B" : "#5E5747"
   return (
     <svg width={W} height={H} className="shrink-0">
       <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round"/>
@@ -83,31 +84,27 @@ export default function HistoryPage() {
   const totalScans = domains.reduce((n, d) => n + d.scan_count, 0)
 
   return (
-    <div className="min-h-screen bg-sentinel-bg text-slate-200 flex flex-col">
-      <header className="sticky top-0 z-10 shrink-0 flex items-center gap-4 px-5 py-3
-                          border-b border-sentinel-border bg-sentinel-surface">
-        <a href="/scan" className="text-sentinel-muted hover:text-white transition-colors text-sm">
-          ← VulnSentinel
-        </a>
-        <span className="text-sentinel-border">·</span>
-        <span className="text-sm font-semibold text-white">Vulnerability History</span>
+    <div className="min-h-screen bg-sentinel-bg text-ink flex flex-col">
+      <Header />
+      <div className="flex items-center gap-4 px-5 py-3 border-b border-sentinel-border bg-sentinel-surface">
+        <span className="text-sm font-black tracking-tight text-ink">Vulnerability History</span>
 
         <div className="ml-auto flex items-center gap-3">
           <span className="text-xs text-sentinel-muted font-mono">
             {domains.length} site{domains.length !== 1 ? "s" : ""} · {totalScans} scan{totalScans !== 1 ? "s" : ""}
           </span>
           <a href="/retention"
-             className="text-xs px-3 py-1.5 rounded-lg border border-white/10 text-sentinel-muted
-                        hover:text-white hover:bg-white/5 transition-colors font-medium">
+             className="text-xs px-3 py-1.5 rounded-lg border border-ink/10 text-sentinel-muted
+                        hover:text-ink hover:bg-ink/5 transition-colors font-medium">
             Retention
           </a>
           <a href="/scan"
-             className="text-xs px-3 py-1.5 rounded-lg bg-sentinel-cyan/10 text-sentinel-cyan
-                        border border-sentinel-cyan/20 hover:bg-sentinel-cyan/20 transition-colors font-medium">
+             className="text-xs px-3 py-1.5 rounded-full bg-ink text-cream
+                        hover:opacity-85 transition-opacity font-bold">
             + New Scan
           </a>
         </div>
-      </header>
+      </div>
 
       <main className="flex-1 max-w-4xl mx-auto w-full px-5 py-8">
         {/* Search */}
@@ -126,7 +123,7 @@ export default function HistoryPage() {
           />
           {search && (
             <button onClick={() => setSearch("")}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-sentinel-muted hover:text-white">
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-sentinel-muted hover:text-ink">
               ✕
             </button>
           )}
@@ -186,7 +183,7 @@ export default function HistoryPage() {
                     <div className="flex-1 min-w-0">
                       {/* Domain + risk pill */}
                       <div className="flex items-center gap-2 flex-wrap mb-1">
-                        <span className="text-sm font-mono font-semibold text-white truncate" title={d.domain}>
+                        <span className="text-sm font-mono font-semibold text-ink truncate" title={d.domain}>
                           {d.domain}
                         </span>
                         <span className={`text-xs font-mono px-2 py-0.5 rounded-full border ${RISK_PILL[latest.overall_risk] ?? RISK_PILL.UNKNOWN}`}>
@@ -216,9 +213,9 @@ export default function HistoryPage() {
                         {(["critical","high","medium","low"] as const).map((sev) => (
                           <span key={sev} className="text-xs font-mono">
                             <span className={sev === "critical" ? "text-sentinel-red font-semibold"
-                              : sev === "high" ? "text-orange-400 font-semibold"
-                              : sev === "medium" ? "text-yellow-400 font-semibold"
-                              : "text-blue-400 font-semibold"}>
+                              : sev === "high" ? "text-orange-300 font-semibold"
+                              : sev === "medium" ? "text-yellow-300 font-semibold"
+                              : "text-blue-300 font-semibold"}>
                               {latest.severity[sev]}
                             </span>
                             <span className="text-sentinel-muted ml-1">{sev}</span>

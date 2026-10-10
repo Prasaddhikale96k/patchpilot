@@ -67,14 +67,14 @@ export default function VulnCard({ vuln, patch }: { vuln: Vulnerability; patch?:
 
           {/* Port badge */}
           {isPortScan && vuln.port && (
-            <span className="text-xs px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/20 font-mono">
+            <span className="text-xs px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-300 border border-purple-500/20 font-mono">
               {vuln.port}/{vuln.service}
             </span>
           )}
 
           {/* Primary CVE */}
           {vuln.cve && (
-            <span className="text-xs px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 font-mono">
+            <span className="text-xs px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-300 border border-blue-500/20 font-mono">
               {vuln.cve}
             </span>
           )}
@@ -83,7 +83,7 @@ export default function VulnCard({ vuln, patch }: { vuln: Vulnerability; patch?:
       </div>
 
       {/* Description */}
-      <p className="text-sm text-slate-300 leading-relaxed">{vuln.description}</p>
+      <p className="text-sm text-ink-soft leading-relaxed">{vuln.description}</p>
 
       {/* Port-specific details */}
       {isPortScan && (
@@ -91,9 +91,9 @@ export default function VulnCard({ vuln, patch }: { vuln: Vulnerability; patch?:
 
           {/* Banner */}
           {vuln.banner && vuln.banner !== "—" && (
-            <div className="text-xs font-mono bg-black/30 border border-sentinel-border rounded-lg px-3 py-2">
+            <div className="text-xs font-mono bg-ink/5 border border-sentinel-border rounded-lg px-3 py-2">
               <span className="text-sentinel-muted mr-2">Banner:</span>
-              <span className="text-slate-300">{vuln.banner}</span>
+              <span className="text-ink-soft">{vuln.banner}</span>
             </div>
           )}
 
@@ -103,7 +103,7 @@ export default function VulnCard({ vuln, patch }: { vuln: Vulnerability; patch?:
               <p className="text-xs text-sentinel-muted font-mono uppercase tracking-wider">Known CVEs</p>
               <div className="flex flex-wrap gap-1.5">
                 {vuln.all_cves.map((cve) => (
-                  <span key={cve} className="text-xs px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 font-mono">
+                  <span key={cve} className="text-xs px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-300 border border-blue-500/20 font-mono">
                     {cve}
                   </span>
                 ))}
@@ -117,7 +117,7 @@ export default function VulnCard({ vuln, patch }: { vuln: Vulnerability; patch?:
               <p className="text-xs text-sentinel-muted font-mono uppercase tracking-wider">CWEs</p>
               <div className="flex flex-wrap gap-1.5">
                 {vuln.cwes.map((cwe) => (
-                  <span key={cwe} className="text-xs px-2 py-0.5 rounded-full bg-orange-500/10 text-orange-400 border border-orange-500/20 font-mono">
+                  <span key={cwe} className="text-xs px-2 py-0.5 rounded-full bg-orange-500/10 text-orange-300 border border-orange-500/20 font-mono">
                     {cwe.split(" ")[0]}
                   </span>
                 ))}
@@ -145,7 +145,7 @@ export default function VulnCard({ vuln, patch }: { vuln: Vulnerability; patch?:
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
           </svg>
           <span className="truncate">{vuln.file}</span>
-          {vuln.line > 0 && <span className="shrink-0 text-slate-500">:{vuln.line}</span>}
+          {vuln.line > 0 && <span className="shrink-0 text-ink-muted">:{vuln.line}</span>}
         </div>
       )}
 
@@ -162,14 +162,14 @@ export default function VulnCard({ vuln, patch }: { vuln: Vulnerability; patch?:
             {patchHasCode && (
               <>
                 <div>
-                  <div className="text-red-400/70 mb-1">- Original</div>
-                  <pre className="bg-red-500/5 border border-red-500/20 rounded-lg p-3 text-red-400 overflow-x-auto whitespace-pre-wrap break-all">
+                  <div className="text-red-300 mb-1">- Original</div>
+                  <pre className="bg-red-500/5 border border-red-500/20 rounded-lg p-3 text-red-300 overflow-x-auto whitespace-pre-wrap break-all">
                     {origCode}
                   </pre>
                 </div>
                 <div>
-                  <div className="text-green-400/70 mb-1">+ Patched</div>
-                  <pre className="bg-green-500/5 border border-green-500/20 rounded-lg p-3 text-green-400 overflow-x-auto whitespace-pre-wrap break-all">
+                  <div className="text-green-300 mb-1">+ Patched</div>
+                  <pre className="bg-green-500/5 border border-green-500/20 rounded-lg p-3 text-green-300 overflow-x-auto whitespace-pre-wrap break-all">
                     {patchedCode}
                   </pre>
                 </div>

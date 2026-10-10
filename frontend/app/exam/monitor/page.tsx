@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useWebSocket, type WSMessage } from "@/lib/ws"
+import { WS_BASE } from "@/lib/apiConfig"
 import {
   statusFromScore,
   STATUS_META,
@@ -15,8 +16,6 @@ import {
   type TimelineEntry,
   type ScorePoint,
 } from "@/lib/examPdf"
-
-const WS_BASE = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8000"
 
 interface DashRecord {
   studentId: string
@@ -133,22 +132,22 @@ export default function ClassMonitorDashboard() {
   const downloadClass = () => generateClassPDF(records.map(toStudentRecord)).catch(() => {})
 
   return (
-    <div className="flex flex-col h-screen bg-sentinel-bg overflow-hidden">
+    <div className="flex flex-col h-screen bg-legacy-bg overflow-hidden">
       {/* Top bar */}
-      <header className="shrink-0 flex items-center gap-4 px-5 py-3 border-b border-sentinel-border bg-sentinel-surface">
-        <a href="/exam" className="text-sentinel-muted hover:text-white transition-colors text-sm">← ExamGuard</a>
-        <span className="text-sentinel-border">·</span>
-        <span className="text-xs font-mono text-sentinel-muted">class monitor</span>
+      <header className="shrink-0 flex items-center gap-4 px-5 py-3 border-b border-legacy-border bg-legacy-surface">
+        <a href="/exam" className="text-legacy-muted hover:text-white transition-colors text-sm">← ExamGuard</a>
+        <span className="text-legacy-border">·</span>
+        <span className="text-xs font-mono text-legacy-muted">class monitor</span>
         <div className="ml-auto flex items-center gap-4">
-          <span className={`flex items-center gap-1.5 text-xs font-mono ${status === "open" ? "text-sentinel-green" : "text-sentinel-muted"}`}>
-            <span className={`w-1.5 h-1.5 rounded-full ${status === "open" ? "bg-sentinel-green animate-pulse" : "bg-sentinel-muted"}`} />
+          <span className={`flex items-center gap-1.5 text-xs font-mono ${status === "open" ? "text-legacy-green" : "text-legacy-muted"}`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${status === "open" ? "bg-legacy-green animate-pulse" : "bg-legacy-muted"}`} />
             {status === "open" ? "LIVE" : status.toUpperCase()}
           </span>
           <button
             onClick={downloadClass}
             disabled={records.length === 0}
-            className="text-xs px-3 py-1.5 rounded-lg border border-sentinel-cyan/30 text-sentinel-cyan bg-sentinel-cyan/5
-                       hover:bg-sentinel-cyan/15 disabled:opacity-40 transition-colors font-medium"
+            className="text-xs px-3 py-1.5 rounded-lg border border-legacy-cyan/30 text-legacy-cyan bg-legacy-cyan/5
+                       hover:bg-legacy-cyan/15 disabled:opacity-40 transition-colors font-medium"
           >
             Class Summary PDF
           </button>
@@ -156,29 +155,29 @@ export default function ClassMonitorDashboard() {
       </header>
 
       {/* Summary bar */}
-      <div className="shrink-0 grid grid-cols-5 border-b border-sentinel-border">
+      <div className="shrink-0 grid grid-cols-5 border-b border-legacy-border">
         {[
           { label: "Total",          value: buckets.total,      color: "text-white" },
-          { label: "Clean",          value: buckets.clean,      color: "text-sentinel-green" },
+          { label: "Clean",          value: buckets.clean,      color: "text-legacy-green" },
           { label: "Warning",        value: buckets.warning,    color: "text-yellow-400" },
-          { label: "Critical",       value: buckets.critical,   color: "text-sentinel-red" },
-          { label: "Terminated",     value: buckets.terminated, color: "text-sentinel-muted" },
+          { label: "Critical",       value: buckets.critical,   color: "text-legacy-red" },
+          { label: "Terminated",     value: buckets.terminated, color: "text-legacy-muted" },
         ].map((s) => (
-          <div key={s.label} className="text-center py-4 border-r border-sentinel-border last:border-r-0">
+          <div key={s.label} className="text-center py-4 border-r border-legacy-border last:border-r-0">
             <div className={`text-2xl font-bold font-mono ${s.color}`}>{s.value}</div>
-            <div className="text-xs text-sentinel-muted mt-0.5">{s.label}</div>
+            <div className="text-xs text-legacy-muted mt-0.5">{s.label}</div>
           </div>
         ))}
       </div>
 
       {/* Host ping banner (<40) */}
       {pingIds.length > 0 && (
-        <div className="shrink-0 flex items-center gap-2 px-5 py-2 bg-sentinel-red/10 border-b border-sentinel-red/30">
-          <span className="w-1.5 h-1.5 rounded-full bg-sentinel-red animate-pulse" />
-          <span className="text-xs text-sentinel-red font-mono">
+        <div className="shrink-0 flex items-center gap-2 px-5 py-2 bg-legacy-red/10 border-b border-legacy-red/30">
+          <span className="w-1.5 h-1.5 rounded-full bg-legacy-red animate-pulse" />
+          <span className="text-xs text-legacy-red font-mono">
             {pingIds.length} student{pingIds.length > 1 ? "s" : ""} critically low — immediate attention required
           </span>
-          <button onClick={() => setPingIds([])} className="ml-auto text-xs text-sentinel-muted hover:text-white">dismiss</button>
+          <button onClick={() => setPingIds([])} className="ml-auto text-xs text-legacy-muted hover:text-white">dismiss</button>
         </div>
       )}
 
@@ -189,14 +188,14 @@ export default function ClassMonitorDashboard() {
         <section>
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-semibold text-slate-300 flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-sentinel-red animate-pulse" />
-              Alert Queue <span className="text-sentinel-muted font-normal">· score &lt; 60, lowest first</span>
+              <span className="w-2 h-2 rounded-full bg-legacy-red animate-pulse" />
+              Alert Queue <span className="text-legacy-muted font-normal">· score &lt; 60, lowest first</span>
             </h2>
-            <span className="text-xs font-mono text-sentinel-muted">{alertQueue.length} flagged</span>
+            <span className="text-xs font-mono text-legacy-muted">{alertQueue.length} flagged</span>
           </div>
 
           {alertQueue.length === 0 ? (
-            <div className="rounded-xl border border-sentinel-border bg-sentinel-surface p-8 text-center text-sentinel-muted text-sm">
+            <div className="rounded-xl border border-legacy-border bg-legacy-surface p-8 text-center text-legacy-muted text-sm">
               No students below 60. {records.length > 0 ? "All clear." : "Waiting for sessions…"}
             </div>
           ) : (
@@ -210,28 +209,28 @@ export default function ClassMonitorDashboard() {
         <section>
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-semibold text-slate-300">Roster</h2>
-            <button onClick={() => setShowAll((v) => !v)} className="text-xs px-3 py-1 rounded-lg border border-sentinel-border text-sentinel-muted hover:text-white transition-colors">
+            <button onClick={() => setShowAll((v) => !v)} className="text-xs px-3 py-1 rounded-lg border border-legacy-border text-legacy-muted hover:text-white transition-colors">
               {showAll ? "Hide clean" : `Show All (${others.length})`}
             </button>
           </div>
           {showAll ? (
-            <div className="rounded-xl border border-sentinel-border overflow-hidden">
+            <div className="rounded-xl border border-legacy-border overflow-hidden">
               {others.map((r) => {
                 const st = statusFromScore(r.score, r.terminated)
                 return (
-                  <div key={r.studentId} className="flex items-center gap-3 px-4 py-2.5 border-b border-sentinel-border last:border-b-0">
+                  <div key={r.studentId} className="flex items-center gap-3 px-4 py-2.5 border-b border-legacy-border last:border-b-0">
                     <span className={`w-1.5 h-1.5 rounded-full ${STATUS_META[st].dot}`} />
                     <span className="text-sm text-slate-200 flex-1 truncate">{r.studentName}</span>
                     <span className={`text-sm font-mono font-semibold ${STATUS_META[st].text}`}>{r.score}</span>
-                    <span className="text-xs text-sentinel-muted w-24">{STATUS_META[st].label}</span>
-                    <button onClick={() => downloadIncident(r)} className="text-xs text-sentinel-cyan hover:underline">PDF</button>
+                    <span className="text-xs text-legacy-muted w-24">{STATUS_META[st].label}</span>
+                    <button onClick={() => downloadIncident(r)} className="text-xs text-legacy-cyan hover:underline">PDF</button>
                   </div>
                 )
               })}
-              {others.length === 0 && <div className="px-4 py-6 text-center text-sentinel-muted text-sm">No clean students yet.</div>}
+              {others.length === 0 && <div className="px-4 py-6 text-center text-legacy-muted text-sm">No clean students yet.</div>}
             </div>
           ) : (
-            <p className="text-xs text-sentinel-muted">Clean &amp; warning students hidden. Click “Show All”.</p>
+            <p className="text-xs text-legacy-muted">Clean &amp; warning students hidden. Click “Show All”.</p>
           )}
         </section>
       </div>
@@ -253,7 +252,7 @@ function AlertCard({
   const top3 = [...r.timeline].sort((a, b) => b.ts - a.ts).slice(0, 3)
 
   return (
-    <div className="rounded-xl border border-sentinel-border bg-sentinel-surface p-4 space-y-3">
+    <div className="rounded-xl border border-legacy-border bg-legacy-surface p-4 space-y-3">
       <div className="flex items-start gap-3">
         {/* Mini score ring */}
         <div className="relative w-12 h-12 shrink-0">
@@ -271,22 +270,22 @@ function AlertCard({
 
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium text-slate-200 truncate">{r.studentName}</p>
-          <p className="text-xs font-mono text-sentinel-muted truncate">{r.studentId}</p>
+          <p className="text-xs font-mono text-legacy-muted truncate">{r.studentId}</p>
           <div className="flex gap-1.5 mt-1">
             {r.flagged && <span className="text-[10px] px-1.5 py-0.5 rounded-full pill-critical">REVIEW</span>}
-            {r.terminated && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-sentinel-muted/20 text-sentinel-muted border border-sentinel-muted/30">TERMINATED</span>}
+            {r.terminated && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-legacy-muted/20 text-legacy-muted border border-legacy-muted/30">TERMINATED</span>}
           </div>
         </div>
       </div>
 
       {/* Top 3 violations */}
       <div className="space-y-1">
-        {top3.length === 0 && <p className="text-xs text-sentinel-muted">No violations recorded.</p>}
+        {top3.length === 0 && <p className="text-xs text-legacy-muted">No violations recorded.</p>}
         {top3.map((e, i) => (
           <div key={i} className="flex items-center gap-2 text-xs">
-            <span className="text-sentinel-red">●</span>
+            <span className="text-legacy-red">●</span>
             <span className="text-slate-300 flex-1 truncate">{e.label}</span>
-            <span className="font-mono text-sentinel-muted">{new Date(e.ts * 1000).toLocaleTimeString("en-IN", { hour12: false })}</span>
+            <span className="font-mono text-legacy-muted">{new Date(e.ts * 1000).toLocaleTimeString("en-IN", { hour12: false })}</span>
           </div>
         ))}
       </div>
@@ -294,7 +293,7 @@ function AlertCard({
       {/* Actions */}
       <div className="flex gap-2 pt-1">
         <a href={`/exam/${r.studentId}/monitor`}
-           className="flex-1 text-center text-xs px-2 py-1.5 rounded-lg border border-sentinel-border text-slate-300 hover:bg-sentinel-border/40 transition-colors">
+           className="flex-1 text-center text-xs px-2 py-1.5 rounded-lg border border-legacy-border text-slate-300 hover:bg-legacy-border/40 transition-colors">
           View Feed
         </a>
         <button onClick={() => onFlag(r.studentId)}
@@ -302,11 +301,11 @@ function AlertCard({
           Flag
         </button>
         <button onClick={() => onTerminate(r.studentId)}
-                className="text-xs px-2.5 py-1.5 rounded-lg border border-sentinel-red/30 text-sentinel-red hover:bg-sentinel-red/10 transition-colors">
+                className="text-xs px-2.5 py-1.5 rounded-lg border border-legacy-red/30 text-legacy-red hover:bg-legacy-red/10 transition-colors">
           Terminate
         </button>
         <button onClick={() => onPdf(r)}
-                className="text-xs px-2.5 py-1.5 rounded-lg border border-sentinel-cyan/30 text-sentinel-cyan hover:bg-sentinel-cyan/10 transition-colors">
+                className="text-xs px-2.5 py-1.5 rounded-lg border border-legacy-cyan/30 text-legacy-cyan hover:bg-legacy-cyan/10 transition-colors">
           PDF
         </button>
       </div>

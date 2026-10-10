@@ -4,9 +4,9 @@ interface Props {
 }
 
 const VERDICT_STYLES: Record<string, { color: string; ring: string }> = {
-  CLEAN:      { color: "text-sentinel-green",  ring: "stroke-sentinel-green" },
+  CLEAN:      { color: "text-legacy-green",  ring: "stroke-legacy-green" },
   SUSPICIOUS: { color: "text-yellow-400",      ring: "stroke-yellow-400" },
-  FLAGGED:    { color: "text-sentinel-red",    ring: "stroke-sentinel-red" },
+  FLAGGED:    { color: "text-legacy-red",    ring: "stroke-legacy-red" },
 }
 
 export default function IntegrityScore({ score, verdict }: Props) {
@@ -33,7 +33,7 @@ export default function IntegrityScore({ score, verdict }: Props) {
         </svg>
         <div className="absolute inset-0 flex flex-col items-center justify-center">
           <span className={`text-3xl font-bold font-mono ${style.color}`}>{score}</span>
-          <span className="text-xs text-sentinel-muted">/ 100</span>
+          <span className="text-xs text-legacy-muted">/ 100</span>
         </div>
       </div>
 

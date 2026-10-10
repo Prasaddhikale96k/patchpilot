@@ -27,15 +27,15 @@ const OUTCOME_MEANING: Record<string, string> = {
 const STATE_STYLE: Record<string, string> = {
   active:   "bg-cyan-500/15 text-cyan-300 border-cyan-500/30",
   archived: "bg-purple-500/15 text-purple-300 border-purple-500/30",
-  trashed:  "bg-slate-500/20 text-slate-300 border-slate-500/30",
-  purged:   "bg-red-500/10 text-red-300/80 border-red-500/25",
+  trashed:  "bg-slate-500/20 text-ink-soft border-slate-500/30",
+  purged:   "bg-red-500/10 text-red-300 border-red-500/25",
 }
 
 const COMPONENT_STYLE: Record<string, string> = {
   complete:           "text-emerald-300",
   retained:           "text-yellow-300",
   retained_by_policy: "text-purple-300",
-  not_present:        "text-slate-500",
+  not_present:        "text-ink-muted",
   blocked:            "text-orange-300",
   unresolved:         "text-red-300",
 }
@@ -51,7 +51,7 @@ const COMPONENT_LABEL: Record<string, string> = {
 }
 
 function Pill({ value, className = "" }: { value: string; className?: string }) {
-  const style = OUTCOME_STYLE[value] ?? STATE_STYLE[value] ?? "bg-white/5 text-slate-300 border-white/10"
+  const style = OUTCOME_STYLE[value] ?? STATE_STYLE[value] ?? "bg-ink/5 text-ink-soft border-ink/10"
   return (
     <span className={`px-2 py-0.5 rounded-full border text-[11px] font-mono font-semibold
                       uppercase tracking-wide ${style} ${className}`}>
@@ -95,13 +95,13 @@ function ReceiptPanel({ receipt, onClose }: { receipt: Receipt; onClose: () => v
         <div className="flex items-center gap-3 px-5 py-4 border-b border-sentinel-border">
           <Pill value={receipt.outcome} />
           <div className="min-w-0">
-            <p className="text-sm font-semibold text-white">
+            <p className="text-sm font-semibold text-ink">
               {receipt.operation} · <span className="font-mono text-sentinel-muted">{receipt.scan_id}</span>
             </p>
             <p className="text-xs text-sentinel-muted">{OUTCOME_MEANING[receipt.outcome]}</p>
           </div>
           <button onClick={onClose}
-                  className="ml-auto text-sentinel-muted hover:text-white text-lg leading-none">✕</button>
+                  className="ml-auto text-sentinel-muted hover:text-ink text-lg leading-none">✕</button>
         </div>
 
         <div className="px-5 py-4 space-y-3 max-h-[55vh] overflow-y-auto">
@@ -114,7 +114,7 @@ function ReceiptPanel({ receipt, onClose }: { receipt: Receipt; onClose: () => v
                 {c.outcome}
               </span>
               <div className="min-w-0">
-                <p className="text-slate-200 font-medium text-[13px]">
+                <p className="text-ink font-medium text-[13px]">
                   {COMPONENT_LABEL[c.component] ?? c.component}
                 </p>
                 <p className="text-sentinel-muted text-[13px] leading-relaxed">{c.detail}</p>
@@ -127,7 +127,7 @@ function ReceiptPanel({ receipt, onClose }: { receipt: Receipt; onClose: () => v
               <p className="text-[11px] uppercase tracking-wider text-purple-300 font-mono mb-1.5">
                 Tombstone written to the ledger
               </p>
-              <p className="text-xs text-slate-300 font-mono break-all">
+              <p className="text-xs text-ink-soft font-mono break-all">
                 sha256 {receipt.tombstone.payload_sha256}
               </p>
               <p className="text-xs text-sentinel-muted mt-1">
@@ -168,7 +168,7 @@ function ScanRow({ item, busy, onAction }: {
       <div className="flex flex-wrap items-center gap-3 px-4 py-3">
         <Pill value={item.state} />
         <button onClick={() => setOpen(!open)} className="min-w-0 text-left group">
-          <p className="text-sm text-white truncate group-hover:text-sentinel-cyan transition-colors">
+          <p className="text-sm text-ink truncate group-hover:text-sentinel-cyan transition-colors">
             {item.domain || item.repo_url}
           </p>
           <p className="text-[11px] font-mono text-sentinel-muted">
@@ -205,12 +205,12 @@ function ScanRow({ item, busy, onAction }: {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-[11px] font-mono">
             <div>
               <p className="text-sentinel-muted">Risk</p>
-              <p className="text-slate-200">{item.risk_score}/100 {item.overall_risk}</p>
+              <p className="text-ink">{item.risk_score}/100 {item.overall_risk}</p>
             </div>
             <div>
               <p className="text-sentinel-muted">Next policy step</p>
               <p className={item.days_until_due !== null && item.days_until_due < 0
-                            ? "text-yellow-300" : "text-slate-200"}>
+                            ? "text-yellow-300" : "text-ink"}>
                 {!item.next_due_action ? "none scheduled"
                   : item.days_until_due === null ? item.next_due_action
                   : item.days_until_due < 0
@@ -220,11 +220,11 @@ function ScanRow({ item, busy, onAction }: {
             </div>
             <div>
               <p className="text-sentinel-muted">Archived / trashed</p>
-              <p className="text-slate-200">{when(item.archived_at)} / {when(item.trashed_at)}</p>
+              <p className="text-ink">{when(item.archived_at)} / {when(item.trashed_at)}</p>
             </div>
             <div>
               <p className="text-sentinel-muted">Purged</p>
-              <p className="text-slate-200">
+              <p className="text-ink">
                 {item.purged_at ? `${when(item.purged_at)} (${item.purge_mode})` : "—"}
               </p>
             </div>
@@ -259,7 +259,7 @@ function ScanRow({ item, busy, onAction }: {
             )}
             {item.state !== "trashed" && item.state !== "purged" && (
               <button disabled={disabled} onClick={() => onAction("trash", item)}
-                      className={`${btn} border-slate-500/30 text-slate-300 hover:bg-white/5`}>
+                      className={`${btn} border-slate-500/30 text-ink-soft hover:bg-ink/5`}>
                 Delete
               </button>
             )}
@@ -280,7 +280,7 @@ function ScanRow({ item, busy, onAction }: {
               {item.hold ? "Release hold" : "Place hold"}
             </button>
             <button disabled={disabled} onClick={() => onAction("verify", item)}
-                    className={`${btn} border-white/15 text-slate-300 hover:bg-white/5 ml-auto`}>
+                    className={`${btn} border-ink/15 text-ink-soft hover:bg-ink/5 ml-auto`}>
               Verify erasure
             </button>
           </div>
@@ -380,18 +380,18 @@ export default function RetentionPage() {
   const counts = inv?.counts ?? { active: 0, archived: 0, trashed: 0, purged: 0 }
 
   return (
-    <div className="min-h-screen bg-sentinel-bg text-slate-200 flex flex-col">
+    <div className="min-h-screen bg-sentinel-bg text-ink flex flex-col">
       <header className="sticky top-0 z-10 shrink-0 flex flex-wrap items-center gap-3 px-5 py-3
                           border-b border-sentinel-border bg-sentinel-surface">
-        <a href="/history" className="text-sentinel-muted hover:text-white transition-colors text-sm">
+        <a href="/history" className="text-sentinel-muted hover:text-ink transition-colors text-sm">
           ← History
         </a>
         <span className="text-sentinel-border">·</span>
-        <span className="text-sm font-semibold text-white">Data Retention</span>
+        <span className="text-sm font-semibold text-ink">Data Retention</span>
         <div className="ml-auto flex items-center gap-2">
           <button onClick={() => onSweep(true)} disabled={busy !== null}
-                  className="text-xs px-3 py-1.5 rounded-lg border border-white/15 text-slate-300
-                             hover:bg-white/5 transition-colors disabled:opacity-40">
+                  className="text-xs px-3 py-1.5 rounded-lg border border-ink/15 text-ink-soft
+                             hover:bg-ink/5 transition-colors disabled:opacity-40">
             Preview policy sweep
           </button>
           <button onClick={() => onSweep(false)} disabled={busy !== null}
@@ -405,7 +405,7 @@ export default function RetentionPage() {
 
       <main className="flex-1 max-w-5xl mx-auto w-full px-5 py-8 space-y-6">
         {error && (
-          <p className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+          <p className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
             {error}
           </p>
         )}
@@ -421,7 +421,7 @@ export default function RetentionPage() {
             {/* Policy + state counts */}
             <section className="rounded-2xl border border-sentinel-border bg-sentinel-surface p-5">
               <div className="flex flex-wrap items-baseline gap-3 mb-4">
-                <h2 className="text-sm font-semibold text-white">Retention policy</h2>
+                <h2 className="text-sm font-semibold text-ink">Retention policy</h2>
                 {chain && (
                   <span className={`text-[11px] font-mono px-2 py-0.5 rounded-full border
                                     ${OUTCOME_STYLE[chain.outcome]}`}>
@@ -437,9 +437,9 @@ export default function RetentionPage() {
                   ["Purge after trash", `${inv.policy.purge_after_days}d`],
                   ["Cold archive", `${inv.archive_files} files · ${bytes(inv.archive_bytes)}`],
                 ] as const).map(([label, value]) => (
-                  <div key={label} className="rounded-lg bg-black/20 border border-white/5 px-3 py-2">
+                  <div key={label} className="rounded-lg bg-ink/5 border border-ink/5 px-3 py-2">
                     <p className="text-[11px] text-sentinel-muted">{label}</p>
-                    <p className="text-sm font-mono text-slate-200">{value}</p>
+                    <p className="text-sm font-mono text-ink">{value}</p>
                   </div>
                 ))}
               </div>
@@ -455,21 +455,21 @@ export default function RetentionPage() {
                 "border-emerald-500/30 bg-emerald-500/5"}`}>
                 <div className="flex items-center gap-3 mb-3">
                   <Pill value={sweep.outcome} />
-                  <h2 className="text-sm font-semibold text-white">
+                  <h2 className="text-sm font-semibold text-ink">
                     Policy sweep {sweep.dry_run ? "(preview, nothing changed)" : "(executed)"}
                   </h2>
                   <button onClick={() => setSweep(null)}
-                          className="ml-auto text-sentinel-muted hover:text-white">✕</button>
+                          className="ml-auto text-sentinel-muted hover:text-ink">✕</button>
                 </div>
-                <p className="text-xs text-slate-300 mb-3">{sweep.detail}</p>
+                <p className="text-xs text-ink-soft mb-3">{sweep.detail}</p>
 
                 {sweep.planned.length > 0 && (
                   <div className="space-y-1.5 mb-3">
                     {sweep.planned.map((p) => (
                       <div key={p.scan_id} className="flex items-center gap-3 text-xs font-mono">
                         <span className="text-sentinel-muted w-20">{p.scan_id}</span>
-                        <span className="text-slate-300 flex-1 truncate">{p.domain}</span>
-                        <span className="text-slate-400">{age(p.age_days)}</span>
+                        <span className="text-ink-soft flex-1 truncate">{p.domain}</span>
+                        <span className="text-ink-muted">{age(p.age_days)}</span>
                         <span className={p.held ? "text-orange-300" : "text-cyan-300"}>
                           {p.held ? `${p.action} (held)` : p.action}
                         </span>
@@ -490,7 +490,7 @@ export default function RetentionPage() {
                     {sweep.receipts.map((r) => (
                       <button key={r.scan_id} onClick={() => setReceipt(r)}
                               className="flex items-center gap-2 text-xs px-2.5 py-1 rounded-lg
-                                         border border-white/10 hover:bg-white/5">
+                                         border border-ink/10 hover:bg-ink/5">
                         <span className="font-mono text-sentinel-muted">{r.scan_id}</span>
                         <Pill value={r.outcome} />
                       </button>
@@ -508,11 +508,11 @@ export default function RetentionPage() {
                                                   "border-emerald-500/30 bg-emerald-500/5"}`}>
                 <div className="flex items-center gap-3 mb-1">
                   <Pill value={verify.outcome} />
-                  <h2 className="text-sm font-semibold text-white">
+                  <h2 className="text-sm font-semibold text-ink">
                     Erasure verification · <span className="font-mono text-sentinel-muted">{verify.scan_id}</span>
                   </h2>
                   <button onClick={() => setVerify(null)}
-                          className="ml-auto text-sentinel-muted hover:text-white">✕</button>
+                          className="ml-auto text-sentinel-muted hover:text-ink">✕</button>
                 </div>
                 <p className="text-xs text-sentinel-muted mb-3">
                   Every store re-checked directly, not read back from the ledger. {verify.detail}
@@ -523,7 +523,7 @@ export default function RetentionPage() {
                       <span className={`font-mono w-36 shrink-0 ${COMPONENT_STYLE[c.outcome] ?? ""}`}>
                         {c.outcome}
                       </span>
-                      <span className="text-slate-300 w-32 shrink-0">
+                      <span className="text-ink-soft w-32 shrink-0">
                         {COMPONENT_LABEL[c.component] ?? c.component}
                       </span>
                       <span className="text-sentinel-muted flex-1">{c.detail}</span>
@@ -539,7 +539,7 @@ export default function RetentionPage() {
                 <button key={t} onClick={() => setTab(t)}
                         className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
                           tab === t ? "border-sentinel-cyan text-sentinel-cyan"
-                                    : "border-transparent text-sentinel-muted hover:text-white"}`}>
+                                    : "border-transparent text-sentinel-muted hover:text-ink"}`}>
                   {t === "inventory" ? `Scans (${inv.total})` : `Audit ledger (${chain?.entries ?? 0})`}
                 </button>
               ))}
@@ -561,7 +561,7 @@ export default function RetentionPage() {
                             className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${
                               filter === key
                                 ? "border-sentinel-cyan/40 bg-sentinel-cyan/10 text-sentinel-cyan"
-                                : "border-white/10 text-sentinel-muted hover:text-white hover:bg-white/5"}`}>
+                                : "border-ink/10 text-sentinel-muted hover:text-ink hover:bg-ink/5"}`}>
                       {label}
                     </button>
                   ))}
@@ -597,10 +597,10 @@ export default function RetentionPage() {
                   <button key={e.seq} onClick={() => setReceipt(e)}
                           className="w-full flex flex-wrap items-center gap-3 px-4 py-2.5 rounded-xl
                                      border border-sentinel-border bg-sentinel-surface
-                                     hover:border-white/20 transition-colors text-left">
+                                     hover:border-ink/20 transition-colors text-left">
                     <span className="text-[11px] font-mono text-sentinel-muted w-8">#{e.seq}</span>
                     <Pill value={e.outcome} />
-                    <span className="text-sm text-slate-200 w-28">{e.operation}</span>
+                    <span className="text-sm text-ink w-28">{e.operation}</span>
                     <span className="text-[11px] font-mono text-sentinel-muted">{e.scan_id}</span>
                     <span className="text-[11px] text-sentinel-muted">{when(e.at)}</span>
                     <span className="ml-auto text-[11px] font-mono text-sentinel-muted/60">

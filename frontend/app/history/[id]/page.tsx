@@ -8,9 +8,9 @@ import { getScanHistory, type ScanHistoryRecord } from "@/lib/api"
 const SEV_ORDER  = ["CRITICAL", "HIGH", "MEDIUM", "LOW"]
 const SEV_COLORS: Record<string, string> = {
   CRITICAL: "text-sentinel-red",
-  HIGH:     "text-orange-400",
-  MEDIUM:   "text-yellow-400",
-  LOW:      "text-blue-400",
+  HIGH:     "text-orange-300",
+  MEDIUM:   "text-yellow-300",
+  LOW:      "text-blue-300",
 }
 
 interface Vuln  { id: string; file: string; line: number; severity: string; category: string; description: string; cve?: string | null; ip?: string | null; loopback?: boolean }
@@ -60,7 +60,7 @@ export default function HistoryDetailPage({ params }: { params: { id: string } }
     <div className="flex flex-col h-screen bg-sentinel-bg overflow-hidden">
       {/* Header */}
       <header className="shrink-0 flex items-center gap-3 px-5 py-3 border-b border-sentinel-border bg-sentinel-surface">
-        <a href="/history" className="text-sentinel-muted hover:text-white transition-colors text-sm">
+        <a href="/history" className="text-sentinel-muted hover:text-ink transition-colors text-sm">
           ← History
         </a>
         <span className="text-sentinel-border">·</span>
@@ -104,7 +104,7 @@ export default function HistoryDetailPage({ params }: { params: { id: string } }
               <svg className="w-4 h-4 text-sentinel-cyan shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
               </svg>
-              <span className="text-sm font-medium text-white truncate">{record.repo_url}</span>
+              <span className="text-sm font-medium text-ink truncate">{record.repo_url}</span>
               <span className="text-xs font-mono text-sentinel-muted shrink-0">{record.total_vulns} findings</span>
             </div>
             <ExportPDFButton report={report} scanId={scanId} />
@@ -123,7 +123,7 @@ export default function HistoryDetailPage({ params }: { params: { id: string } }
           {/* Summary */}
           {record.summary && (
             <div className="shrink-0 p-4 border-b border-sentinel-border bg-sentinel-surface/50 space-y-2">
-              <p className="text-sm text-slate-300 leading-relaxed">
+              <p className="text-sm text-ink-soft leading-relaxed">
                 {(record.summary as { executive_summary?: string }).executive_summary}
               </p>
               {((record.summary as { key_recommendations?: string[] }).key_recommendations ?? []).length > 0 && (

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import FaceMonitor from "@/components/examguard/FaceMonitor"
 import WarningToast from "@/components/examguard/WarningToast"
 import { useWebSocket } from "@/lib/ws"
+import { WS_BASE } from "@/lib/apiConfig"
 import { getExamSession } from "@/lib/api"
 import { QUESTION_BANK, type MCQ, type SubjectBank } from "@/lib/questionBank"
 import { useTrustScore } from "@/lib/useTrustScore"
@@ -16,8 +17,6 @@ import {
   type TrustState,
   type ViolationType,
 } from "@/lib/trustScore"
-
-const WS_BASE = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8000"
 
 const COLOR_MAP: Record<string, { badge: string; border: string; bg: string; text: string }> = {
   indigo:  { badge: "bg-indigo-100 text-indigo-700",  border: "border-indigo-300",  bg: "bg-indigo-50",  text: "text-indigo-700"  },

@@ -1,30 +1,124 @@
-const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
+import { API_BASE as BASE, WS_BASE, connectionErrorMessage, isConnectionFailure } from "@/lib/apiConfig"
+
+/** HTTP error carrying the status, so callers can tell 404 from 5xx.
+ *  Network-level failures (backend down / CORS-blocked) use status 0. */
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number) { super(message) }
+}
+
+function detailText(detail: unknown, fallback: string): string {
+  if (typeof detail === "string") return detail
+  // FastAPI 422: [{loc, msg, type}, …]
+  if (Array.isArray(detail)) {
+    return detail.map((d) => (d && typeof d === "object" && "msg" in d ? String(d.msg) : String(d))).join("; ")
+  }
+  return fallback
+}
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
-    ...init,
-  })
+  const { headers, ...rest } = init ?? {}
+  let res: Response
+  try {
+    res = await fetch(`${BASE}${path}`, {
+      ...rest,
+      headers: { "Content-Type": "application/json", ...(headers as Record<string, string> | undefined) },
+    })
+  } catch (err) {
+    // Browser hides the reason (backend down, wrong port, DNS, CORS
+    // preflight refusal) behind a TypeError — never surface the raw
+    // "Failed to fetch", and never treat it as an empty success.
+    if (isConnectionFailure(err)) throw new ApiError(connectionErrorMessage(), 0)
+    throw err
+  }
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(err.detail ?? "Request failed")
+    // Error bodies are JSON ({detail}) but a proxy/gateway may answer
+    // with HTML — never crash parsing it.
+    const err = await res.json().catch(() => null)
+    const detail = (err && typeof err === "object" && "detail" in err
+      ? (err as { detail: unknown }).detail
+      : null)
+    throw new ApiError(detailText(detail, `Request failed (${res.status})`), res.status)
   }
   return res.json()
 }
 
 // ── VulnSentinel ───────────────────────────────────────────────
 
-export const startScan = (repo_url: string, opts?: { create_pr?: boolean; target_hint?: string }) =>
-  req<{ scan_id: string; ws_url: string; status: string }>("/api/scan", {
+export interface StartRunResponse { scan_id: string; ws_url: string; status: string; deduplicated?: boolean }
+
+export const startScan = (
+  repo_url: string,
+  opts?: { create_pr?: boolean; target_hint?: string; idempotencyKey?: string },
+) =>
+  req<StartRunResponse>("/api/scan", {
     method: "POST",
+    headers: opts?.idempotencyKey ? { "Idempotency-Key": opts.idempotencyKey } : undefined,
     body: JSON.stringify({ repo_url, create_pr: opts?.create_pr ?? false, target_hint: opts?.target_hint ?? null }),
   })
+
+/** Re-run secure_coder → reviewer → tester from a finished scan.
+ *  open_pr is a separate, explicit consent for the remote write. */
+export const startRemediation = (scan_id: string, opts?: { target_hint?: string; open_pr?: boolean }) =>
+  req<StartRunResponse>("/api/remediate", {
+    method: "POST",
+    body: JSON.stringify({ scan_id, target_hint: opts?.target_hint ?? null, open_pr: opts?.open_pr ?? false }),
+  })
+
+export interface RunStatus {
+  scan_id: string
+  kind: "scan" | "remediation"
+  parent_scan_id: string | null
+  repo_url: string
+  create_pr: boolean
+  status: "queued" | "running" | "completed" | "failed" | "interrupted" | "cancelled"
+  phase: string
+  created_at: number
+  updated_at: number
+  finished_at: number | null
+  error: string | null
+  error_kind: string | null
+  has_report: boolean
+  live?: boolean
+}
+
+export const getRunStatus = (scan_id: string) =>
+  req<RunStatus>(`/api/scans/${encodeURIComponent(scan_id)}/status`)
+
+export const artifactUrl = (scan_id: string, name: string) =>
+  `${BASE}/api/scans/${encodeURIComponent(scan_id)}/artifacts/${encodeURIComponent(name)}`
 
 export const getReport = (scan_id: string) =>
   req<Record<string, unknown>>(`/api/report/${scan_id}`)
 
-export const listScans = () =>
-  req<{ scan_id: string; repo_url: string; status: string; started_at: number }[]>("/api/scans")
+export interface RunListItem {
+  scan_id: string
+  repo_url: string
+  status: RunStatus["status"]
+  started_at: number
+  kind: "scan" | "remediation"
+  phase: string
+  finished_at: number | null
+  error: string | null
+}
+
+export const listScans = () => req<RunListItem[]>("/api/scans")
+
+/** GET /health (see backend/main.py). */
+export interface HealthStatus {
+  status: string
+  version: string
+  llm_backend: string
+  active_scans: number
+}
+export const getHealth = () => req<HealthStatus>("/health")
+
+/** GET /api/llm/status: which model providers are configured and usable. */
+export interface LlmStatus {
+  active_backend: string
+  provider_order: string[]
+  providers: Record<string, { configured: boolean; models?: { id: string; state: string; usable: boolean }[] }>
+}
+export const getLlmStatus = () => req<LlmStatus>("/api/llm/status")
 
 export interface ScanSummaryRecord {
   scan_id:      string
@@ -303,3 +397,9 @@ export const getOsirisIpIntel = (ip: string) =>
 
 export const getOsirisCve = (cve_id: string) =>
   req<OsirisCveRecord>(`/api/osiris/cve/${encodeURIComponent(cve_id)}`)
+
+// ── WebSocket URL ──────────────────────────────────────────────
+// Backend answers ws_url as a relative path ("/ws/<id>"); resolve it against
+// the single configured WS origin instead of hardcoding a host.
+export const buildWsUrl = (scan_id: string, wsUrl?: string) =>
+  `${WS_BASE}${wsUrl && wsUrl.startsWith("/") ? wsUrl : `/ws/${encodeURIComponent(scan_id)}`}`

@@ -18,14 +18,14 @@ import {
  */
 
 const RISK_TONE: Record<string, string> = {
-  CRITICAL: "text-red-400",
-  HIGH:     "text-orange-400",
-  MEDIUM:   "text-yellow-400",
+  CRITICAL: "text-red-300",
+  HIGH:     "text-orange-300",
+  MEDIUM:   "text-yellow-300",
   LOW:      "text-sentinel-green",
 }
 
 function tone(level?: string | null) {
-  return RISK_TONE[(level ?? "").toUpperCase()] ?? "text-slate-300"
+  return RISK_TONE[(level ?? "").toUpperCase()] ?? "text-ink-soft"
 }
 
 /** "CVE-1999-0497 (anonymous FTP login allowed)" → "CVE-1999-0497" */
@@ -38,7 +38,7 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   return (
     <div className="flex gap-2 text-xs">
       <span className="text-sentinel-muted shrink-0 w-24">{label}</span>
-      <span className="text-slate-300 min-w-0 break-words">{children}</span>
+      <span className="text-ink-soft min-w-0 break-words">{children}</span>
     </div>
   )
 }
@@ -104,7 +104,7 @@ export default function OsirisPanel({ ip, cve }: { ip: string; cve?: string | nu
           )}
 
           {error && !loading && (
-            <p className="text-xs text-red-400">
+            <p className="text-xs text-red-300">
               {error}
             </p>
           )}
@@ -150,20 +150,20 @@ export default function OsirisPanel({ ip, cve }: { ip: string; cve?: string | nu
                   <span className="text-xs font-mono text-sentinel-muted">· hosting</span>
                 )}
                 {intel.reputation?.is_proxy && (
-                  <span className="text-xs font-mono text-yellow-400">· proxy</span>
+                  <span className="text-xs font-mono text-yellow-300">· proxy</span>
                 )}
                 {threat?.tor_exit_node && (
-                  <span className="text-xs font-mono text-red-400">· tor exit node</span>
+                  <span className="text-xs font-mono text-red-300">· tor exit node</span>
                 )}
                 {typeof threat?.otx?.pulse_count === "number" && threat.otx.pulse_count > 0 && (
-                  <span className="text-xs font-mono text-orange-400">
+                  <span className="text-xs font-mono text-orange-300">
                     · {threat.otx.pulse_count} OTX pulses
                   </span>
                 )}
               </div>
 
               {intel.sanctions_match ? (
-                <p className="text-xs text-red-400 font-mono">
+                <p className="text-xs text-red-300 font-mono">
                   Sanctions list match — review before further contact.
                 </p>
               ) : null}
@@ -187,7 +187,7 @@ export default function OsirisPanel({ ip, cve }: { ip: string; cve?: string | nu
                       <div className="flex flex-wrap gap-1.5">
                         {expo.vulns.slice(0, 12).map((v) => (
                           <span key={v} className="text-xs px-2 py-0.5 rounded-full bg-red-500/10
-                                                   text-red-400 border border-red-500/20 font-mono">
+                                                   text-red-300 border border-red-500/20 font-mono">
                             {v}
                           </span>
                         ))}
@@ -205,7 +205,7 @@ export default function OsirisPanel({ ip, cve }: { ip: string; cve?: string | nu
                   </p>
                   {record.found ? (
                     <>
-                      <p className="text-xs text-slate-300 leading-relaxed">
+                      <p className="text-xs text-ink-soft leading-relaxed">
                         {record.description}
                       </p>
                       <div className="flex flex-wrap gap-2 text-xs font-mono text-sentinel-muted">

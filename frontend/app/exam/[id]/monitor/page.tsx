@@ -6,8 +6,7 @@ import AlertFeed, { type Alert } from "@/components/examguard/AlertFeed"
 import IntegrityScore from "@/components/examguard/IntegrityScore"
 import { triggerAnalysis } from "@/lib/api"
 import { useWebSocket } from "@/lib/ws"
-
-const WS_BASE = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8000"
+import { WS_BASE } from "@/lib/apiConfig"
 
 interface Report {
   student_name:    string
@@ -109,24 +108,24 @@ export default function InvigilatorMonitor({ params }: { params: { id: string } 
   const warningCount  = alerts.filter((a) => a.severity === "WARNING").length
 
   return (
-    <div className="flex flex-col h-screen bg-sentinel-bg overflow-hidden">
+    <div className="flex flex-col h-screen bg-legacy-bg overflow-hidden">
       {/* Top bar */}
-      <header className="shrink-0 flex items-center gap-4 px-5 py-3 border-b border-sentinel-border bg-sentinel-surface">
-        <a href="/exam" className="text-sentinel-muted hover:text-white transition-colors text-sm">
+      <header className="shrink-0 flex items-center gap-4 px-5 py-3 border-b border-legacy-border bg-legacy-surface">
+        <a href="/exam" className="text-legacy-muted hover:text-white transition-colors text-sm">
           ← ExamGuard
         </a>
-        <span className="text-sentinel-border">·</span>
-        <span className="text-xs font-mono text-sentinel-muted">monitor/{examId}</span>
+        <span className="text-legacy-border">·</span>
+        <span className="text-xs font-mono text-legacy-muted">monitor/{examId}</span>
 
         <div className="ml-auto flex items-center gap-4">
-          <span className="text-xs font-mono text-sentinel-muted">{time}</span>
+          <span className="text-xs font-mono text-legacy-muted">{time}</span>
 
           {/* Connection badge */}
           <span className={`flex items-center gap-1.5 text-xs font-mono ${
-            eventStatus === "open" ? "text-sentinel-green" : "text-sentinel-muted"
+            eventStatus === "open" ? "text-legacy-green" : "text-legacy-muted"
           }`}>
             <span className={`w-1.5 h-1.5 rounded-full ${
-              eventStatus === "open" ? "bg-sentinel-green animate-pulse" : "bg-sentinel-muted"
+              eventStatus === "open" ? "bg-legacy-green animate-pulse" : "bg-legacy-muted"
             }`} />
             {eventStatus === "open" ? "LIVE" : eventStatus.toUpperCase()}
           </span>
@@ -147,14 +146,14 @@ export default function InvigilatorMonitor({ params }: { params: { id: string } 
           {!analysing && !report && (
             <button
               onClick={handleTriggerAnalysis}
-              className="text-xs px-3 py-1.5 rounded-lg bg-sentinel-purple/20 text-sentinel-purple
-                         border border-sentinel-purple/30 hover:bg-sentinel-purple/30 transition-colors font-medium"
+              className="text-xs px-3 py-1.5 rounded-lg bg-legacy-purple/20 text-legacy-purple
+                         border border-legacy-purple/30 hover:bg-legacy-purple/30 transition-colors font-medium"
             >
               Run Analysis
             </button>
           )}
           {analysing && (
-            <span className="text-xs text-sentinel-purple font-mono animate-pulse">Analysing…</span>
+            <span className="text-xs text-legacy-purple font-mono animate-pulse">Analysing…</span>
           )}
         </div>
       </header>
@@ -163,16 +162,16 @@ export default function InvigilatorMonitor({ params }: { params: { id: string } 
       <div className="flex flex-1 overflow-hidden">
 
         {/* Left: Alert feed */}
-        <div className="w-[38%] flex flex-col p-4 border-r border-sentinel-border overflow-hidden">
+        <div className="w-[38%] flex flex-col p-4 border-r border-legacy-border overflow-hidden">
           <AlertFeed alerts={alerts} />
         </div>
 
         {/* Middle: Agent analysis feed */}
-        <div className="w-[37%] flex flex-col p-4 border-r border-sentinel-border overflow-hidden">
+        <div className="w-[37%] flex flex-col p-4 border-r border-legacy-border overflow-hidden">
           {analysisLogs.length > 0 || analysing ? (
             <AgentFeed logs={analysisLogs} isRunning={analysing} />
           ) : (
-            <div className="flex-1 flex flex-col items-center justify-center text-center text-sentinel-muted">
+            <div className="flex-1 flex flex-col items-center justify-center text-center text-legacy-muted">
               <svg className="w-10 h-10 mb-3 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23-.693L5 14.5m14.8.8l1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0112 21c-2.773 0-5.491-.235-8.135-.687-1.718-.293-2.3-2.379-1.067-3.61L5 14.5"/>
               </svg>
@@ -187,14 +186,14 @@ export default function InvigilatorMonitor({ params }: { params: { id: string } 
         <div className="w-[25%] flex flex-col p-4 gap-5 overflow-y-auto">
 
           {/* Score gauge */}
-          <div className="bg-sentinel-surface border border-sentinel-border rounded-xl p-5 flex flex-col items-center">
+          <div className="bg-legacy-surface border border-legacy-border rounded-xl p-5 flex flex-col items-center">
             <IntegrityScore score={score} verdict={verdict} />
-            <p className="text-xs text-sentinel-muted mt-3 text-center">Integrity Score</p>
+            <p className="text-xs text-legacy-muted mt-3 text-center">Integrity Score</p>
           </div>
 
           {/* Stats */}
-          <div className="bg-sentinel-surface border border-sentinel-border rounded-xl p-4 space-y-3">
-            <h3 className="text-xs font-semibold text-sentinel-muted uppercase tracking-wider">Activity Stats</h3>
+          <div className="bg-legacy-surface border border-legacy-border rounded-xl p-4 space-y-3">
+            <h3 className="text-xs font-semibold text-legacy-muted uppercase tracking-wider">Activity Stats</h3>
             {[
               { label: "Tab Switches",  value: report ? report.raw_stats.tab_blur_count   : alerts.filter((a) => a.title?.toLowerCase().includes("tab")).length },
               { label: "Face Absences", value: report ? report.raw_stats.face_absent_count : alerts.filter((a) => a.title?.toLowerCase().includes("face")).length },
@@ -203,8 +202,8 @@ export default function InvigilatorMonitor({ params }: { params: { id: string } 
               { label: "Total Alerts",  value: alerts.length },
             ].map(({ label, value }) => (
               <div key={label} className="flex justify-between items-center text-sm">
-                <span className="text-sentinel-muted">{label}</span>
-                <span className={`font-mono font-semibold ${value > 0 ? "text-yellow-400" : "text-sentinel-green"}`}>
+                <span className="text-legacy-muted">{label}</span>
+                <span className={`font-mono font-semibold ${value > 0 ? "text-yellow-400" : "text-legacy-green"}`}>
                   {value}
                 </span>
               </div>
@@ -213,16 +212,16 @@ export default function InvigilatorMonitor({ params }: { params: { id: string } 
 
           {/* Report narrative */}
           {report?.narrative && (
-            <div className="bg-sentinel-surface border border-sentinel-border rounded-xl p-4 space-y-3">
-              <h3 className="text-xs font-semibold text-sentinel-muted uppercase tracking-wider">AI Report</h3>
+            <div className="bg-legacy-surface border border-legacy-border rounded-xl p-4 space-y-3">
+              <h3 className="text-xs font-semibold text-legacy-muted uppercase tracking-wider">AI Report</h3>
               <p className="text-xs text-slate-300 leading-relaxed">{report.narrative.summary}</p>
               {report.narrative.key_concerns?.length > 0 && (
                 <div>
-                  <p className="text-xs font-medium text-sentinel-muted mb-1.5">Key concerns</p>
+                  <p className="text-xs font-medium text-legacy-muted mb-1.5">Key concerns</p>
                   <ul className="space-y-1">
                     {report.narrative.key_concerns.map((c, i) => (
-                      <li key={i} className="text-xs text-sentinel-muted flex gap-2">
-                        <span className="text-sentinel-red shrink-0">▸</span>
+                      <li key={i} className="text-xs text-legacy-muted flex gap-2">
+                        <span className="text-legacy-red shrink-0">▸</span>
                         <span>{c}</span>
                       </li>
                     ))}
@@ -230,8 +229,8 @@ export default function InvigilatorMonitor({ params }: { params: { id: string } 
                 </div>
               )}
               {report.narrative.recommendation && (
-                <div className="border-t border-sentinel-border pt-3">
-                  <p className="text-xs text-sentinel-green">
+                <div className="border-t border-legacy-border pt-3">
+                  <p className="text-xs text-legacy-green">
                     ▸ {report.narrative.recommendation}
                   </p>
                 </div>
@@ -240,8 +239,8 @@ export default function InvigilatorMonitor({ params }: { params: { id: string } 
           )}
 
           {/* Session link */}
-          <div className="bg-sentinel-surface border border-sentinel-border rounded-xl p-4 space-y-2">
-            <h3 className="text-xs font-semibold text-sentinel-muted uppercase tracking-wider">Share with student</h3>
+          <div className="bg-legacy-surface border border-legacy-border rounded-xl p-4 space-y-2">
+            <h3 className="text-xs font-semibold text-legacy-muted uppercase tracking-wider">Share with student</h3>
             <code className="text-xs text-slate-400 break-all block font-mono">
               /exam/{examId}
             </code>

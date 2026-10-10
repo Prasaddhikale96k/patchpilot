@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type AgentStatus = "pending" | "running" | "done" | "error"
+type AgentStatus = "pending" | "running" | "done" | "error" | "skipped"
 
 interface AgentState {
   key: string
@@ -18,8 +18,13 @@ interface AgentState {
 interface ScanProgressProps {
   /** Last node name received over the scan WebSocket ("" before the first update). */
   activeNode: string
-  /** WebSocket connection status from the parent. */
-  status: "connecting" | "open" | "closed" | "error"
+  /** Feed status: live WebSocket, or "polling" when recovering over REST. */
+  status: "connecting" | "open" | "closed" | "error" | "polling"
+  /**
+   * Nodes that actually ran. When given, a finished scan marks unseen rows
+   * "skipped" instead of claiming every stage (e.g. Tester) completed.
+   */
+  seenNodes?: string[]
   /** True once the final report has been received. */
   done: boolean
   /** Error message if the scan failed. */
@@ -28,12 +33,15 @@ interface ScanProgressProps {
   errorKind?: string | null
   onComplete?: () => void
   onRetry?: () => void
+  /** Accurate label for the retry button: remediation retries must not
+   *  say "Retry Scan" (that implies a full re-scan from Orchestrator). */
+  retryLabel?: string
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 // Visible pipeline rows, in execution order, one per backend graph node.
-const AGENT_PIPELINE: { key: string; label: string; description: string }[] = [
+export const AGENT_PIPELINE: { key: string; label: string; description: string }[] = [
   { key: "orchestrator",     label: "Orchestrator",     description: "Plans scan strategy" },
   { key: "scanner",          label: "Scanner Agent",    description: "Clones repo · runs Semgrep + Bandit" },
   { key: "logic_auditor",    label: "Logic Auditor",    description: "LLM audit for broken access control & path traversal" },
@@ -41,7 +49,9 @@ const AGENT_PIPELINE: { key: string; label: string; description: string }[] = [
   { key: "exploit_reasoner", label: "Exploit Reasoner", description: "Assesses real-world exploitability" },
   { key: "fix_suggester",    label: "Fix Suggester",    description: "Generates code patches" },
   { key: "secure_coder",     label: "Secure Coder",     description: "Writes patch + exploit test (auto-fix runs only)" },
+  { key: "reviewer",         label: "Reviewer",         description: "Re-scan + code review gate (auto-fix runs only)" },
   { key: "tester",           label: "Tester",           description: "Docker red-green verification (auto-fix runs only)" },
+  { key: "pr_creator",       label: "PR Creator",       description: "Opens a pull request — only when explicitly enabled and configured" },
   { key: "report_generator", label: "Report Generator", description: "Calculates the risk score · compiles the report" },
 ]
 
@@ -55,7 +65,9 @@ const NODE_ORDER = [
   "exploit_reasoner",
   "fix_suggester",
   "secure_coder",
+  "reviewer",
   "tester",
+  "pr_creator",
   "report_generator",
 ]
 
@@ -71,12 +83,12 @@ function SpinnerRing() {
     >
       <circle
         cx="12" cy="12" r="9"
-        stroke="#1e1e2e"
+        stroke="#1F2833"
         strokeWidth="3"
       />
       <path
         d="M12 3a9 9 0 0 1 9 9"
-        stroke="#00d4ff"
+        stroke="#60A5FA"
         strokeWidth="3"
         strokeLinecap="round"
       />
@@ -87,10 +99,10 @@ function SpinnerRing() {
 function CheckCircle() {
   return (
     <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" aria-hidden>
-      <circle cx="12" cy="12" r="10" fill="#00d4ff" />
+      <circle cx="12" cy="12" r="10" fill="#60A5FA" />
       <path
         d="M7 12.5l3.5 3.5 6.5-7"
-        stroke="#0d1117"
+        stroke="#11161B"
         strokeWidth="2.5"
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -99,13 +111,13 @@ function CheckCircle() {
   )
 }
 
-function ErrorCircle({ hue = "255,51,102" }: { hue?: string }) {
+function ErrorCircle({ hue = "194,24,91" }: { hue?: string }) {
   return (
     <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" aria-hidden>
       <circle cx="12" cy="12" r="10" fill={`rgb(${hue})`} />
       <path
         d="M8 8l8 8M16 8l-8 8"
-        stroke="#0d1117"
+        stroke="#11161B"
         strokeWidth="2.5"
         strokeLinecap="round"
       />
@@ -116,7 +128,7 @@ function ErrorCircle({ hue = "255,51,102" }: { hue?: string }) {
 function PendingCircle() {
   return (
     <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" aria-hidden>
-      <circle cx="12" cy="12" r="9" stroke="#2a2a3a" strokeWidth="2" />
+      <circle cx="12" cy="12" r="9" stroke="#2B3744" strokeWidth="2" />
     </svg>
   )
 }
@@ -126,17 +138,18 @@ function StepIcon({ status, hue }: { status: AgentStatus; hue?: string }) {
     case "running": return <SpinnerRing />
     case "done":    return <CheckCircle />
     case "error":   return <ErrorCircle hue={hue} />
+    case "skipped": return <span title="Skipped"><PendingCircle /></span>
     default:        return <PendingCircle />
   }
 }
 
-function AgentRow({ agent, isLast, errHue = "255,51,102" }: {
+function AgentRow({ agent, isLast, errHue = "194,24,91" }: {
   agent: AgentState; isLast: boolean; errHue?: string
 }) {
   const isRunning = agent.status === "running"
   const isDone    = agent.status === "done"
   const isError   = agent.status === "error"
-  const isPending = agent.status === "pending"
+  const isPending = agent.status === "pending" || agent.status === "skipped"
 
   return (
     <div className="relative flex gap-4">
@@ -146,8 +159,8 @@ function AgentRow({ agent, isLast, errHue = "255,51,102" }: {
           className="absolute left-3 top-7 w-px h-full -translate-x-px"
           style={{
             background: isDone
-              ? "linear-gradient(to bottom, #00d4ff55, #00d4ff22)"
-              : "#1e1e2e",
+              ? "linear-gradient(to bottom, #60A5FA55, #60A5FA22)"
+              : "#1F2833",
             transition: "background 0.6s ease",
           }}
         />
@@ -171,10 +184,10 @@ function AgentRow({ agent, isLast, errHue = "255,51,102" }: {
           className="rounded-lg px-3 py-2 -mx-3 transition-all duration-500"
           style={{
             background: isRunning
-              ? "rgba(0, 212, 255, 0.05)"
+              ? "rgba(31,95,163, 0.05)"
               : "transparent",
             boxShadow: isRunning
-              ? "0 0 0 1px rgba(0, 212, 255, 0.15)"
+              ? "0 0 0 1px rgba(31,95,163, 0.15)"
               : "none",
           }}
         >
@@ -183,20 +196,23 @@ function AgentRow({ agent, isLast, errHue = "255,51,102" }: {
             <span
               className="font-mono text-sm font-semibold transition-colors duration-300"
               style={{
-                color: isRunning ? "#ffffff"
-                     : isDone    ? "#cbd5e1"
+                color: isRunning ? "#F5F7FA"
+                     : isDone    ? "#C9D1DB"
                      : isError   ? `rgb(${errHue})`
-                     : "#64748b",
+                     : "#8B96A5",
               }}
             >
               {agent.label}
             </span>
             <span
               className="text-xs transition-colors duration-300"
-              style={{ color: isError ? `rgba(${errHue},0.53)` : "#64748b" }}
+              style={{ color: isError ? `rgba(${errHue},0.53)` : "#8B96A5" }}
             >
               {agent.description}
             </span>
+            {agent.status === "skipped" && (
+              <span className="text-[10px] font-mono uppercase tracking-wide text-ink-muted">skipped</span>
+            )}
           </div>
 
           {/* Error message */}
@@ -216,12 +232,16 @@ function AgentRow({ agent, isLast, errHue = "255,51,102" }: {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export default function ScanProgress({ activeNode, status, done, error, errorKind, onComplete, onRetry }: ScanProgressProps) {
-  // A dead API key and a crash in the pipeline are both failures, but only one
-  // of them is fixed by touching the code. Colour and wording say which.
-  const opFault  = errorKind === "llm_unavailable"
-  const errHue   = opFault ? "255,184,0" : "255,51,102"
-  const errSolid = opFault ? "#ffb800" : "#ff3366"
+export default function ScanProgress({ activeNode, status, seenNodes, done, error, errorKind, onComplete, onRetry, retryLabel }: ScanProgressProps) {
+  // Three distinct operational outcomes share the amber treatment but must
+  // not share the explanation: an "interrupted" run means the server
+  // process went away mid-run (restart, --reload, kill) — it says nothing
+  // about API keys or quota, so it must never show that advice.
+  const opFault  = errorKind === "llm_unavailable" || errorKind === "interrupted"
+  const wasInterrupted = errorKind === "interrupted"
+  const seen = seenNodes ? new Set(seenNodes) : null
+  const errHue   = opFault ? "138,97,0" : "194,24,91"
+  const errSolid = opFault ? "#FBBF24" : "#F87171"
   const resultsRef = useRef<HTMLDivElement | null>(null)
 
   // Highest backend node seen so far (it finishes before being emitted), so
@@ -233,9 +253,9 @@ export default function ScanProgress({ activeNode, status, done, error, errorKin
   // Per-row status derived purely from progress state.
   const agents: AgentState[] = AGENT_PIPELINE.map((a, i) => {
     let s: AgentStatus
-    if (done)                              s = "done"
+    if (done)                              s = !seen || seen.has(a.key) ? "done" : "skipped"
     else if (error && i === runningIdx)    s = "error"
-    else if (i <= completedIdx)            s = "done"
+    else if (i <= completedIdx)            s = !seen || seen.has(a.key) ? "done" : "skipped"
     else if (i === runningIdx && !error)   s = "running"
     else                                   s = "pending"
     return {
@@ -266,7 +286,11 @@ export default function ScanProgress({ activeNode, status, done, error, errorKin
 
   const headerLabel =
     done   ? "Scan complete"
-  : error  ? (errorKind === "llm_unavailable" ? "AI backend unavailable" : "Scan failed")
+  : error  ? (errorKind === "llm_unavailable" ? "AI backend unavailable"
+            : errorKind === "interrupted" ? "Scan interrupted"
+            : errorKind === "not_found" ? "Scan not found"
+            : errorKind === "timeout" ? "Scan timed out"
+            : "Scan failed")
   : finalising ? "Finalising report…"
   : runningAgent ? runningAgent.label
   : status === "connecting" ? "Connecting…"
@@ -274,17 +298,20 @@ export default function ScanProgress({ activeNode, status, done, error, errorKin
 
   const connLabel =
     done   ? "COMPLETE"
-  : error  ? (errorKind === "llm_unavailable" ? "UNAVAILABLE" : "ERROR")
+  : error  ? (errorKind === "llm_unavailable" ? "UNAVAILABLE"
+            : errorKind === "interrupted" ? "INTERRUPTED" : "ERROR")
   : status === "open"       ? "LIVE"
+  : status === "polling"    ? "POLLING"
   : status === "connecting" ? "CONNECTING"
   : "CLOSED"
 
   const connColor =
-    done   ? "#00ff88"
-  : error  ? (errorKind === "llm_unavailable" ? "#ffb800" : "#ff3366")
-  : status === "open"       ? "#00ff88"
-  : status === "connecting" ? "#ffb800"
-  : "#64748b"
+    done   ? "#10B981"
+  : error  ? (opFault ? "#FBBF24" : "#F87171")
+  : status === "open"       ? "#10B981"
+  : status === "polling"    ? "#60A5FA"
+  : status === "connecting" ? "#FBBF24"
+  : "#8B96A5"
 
   // ── Auto-scroll on completion ───────────────────────────────
   useEffect(() => {
@@ -302,42 +329,42 @@ export default function ScanProgress({ activeNode, status, done, error, errorKin
     <div
       className="w-full rounded-2xl overflow-hidden"
       style={{
-        background:  "#0d1117",
-        border:      "1px solid #1e1e2e",
+        background:  "#11161B",
+        border:      "1px solid #1F2833",
         fontFamily:  "'JetBrains Mono', Menlo, Monaco, Consolas, monospace",
       }}
     >
       {/* ── Header ── */}
       <div
         className="flex items-center justify-between px-5 py-3.5"
-        style={{ borderBottom: "1px solid #1e1e2e", background: "#0d1117" }}
+        style={{ borderBottom: "1px solid #1F2833", background: "#11161B" }}
       >
         <div className="flex items-center gap-2.5">
           {/* macOS traffic lights */}
-          <span className="w-3 h-3 rounded-full" style={{ background: "#ff3366" }} />
-          <span className="w-3 h-3 rounded-full" style={{ background: "#ffb800" }} />
-          <span className="w-3 h-3 rounded-full" style={{ background: "#00ff88" }} />
-          <span className="ml-3 text-xs" style={{ color: "#64748b" }}>
+          <span className="w-3 h-3 rounded-full" style={{ background: "#F87171" }} />
+          <span className="w-3 h-3 rounded-full" style={{ background: "#FBBF24" }} />
+          <span className="w-3 h-3 rounded-full" style={{ background: "#10B981" }} />
+          <span className="ml-3 text-xs" style={{ color: "#8B96A5" }}>
             scan-progress
           </span>
         </div>
 
         <div className="flex items-center gap-3">
           {/* Live / connecting indicator */}
-          <span className="flex items-center gap-1.5 text-xs" style={{ color: "#64748b" }}>
+          <span className="flex items-center gap-1.5 text-xs" style={{ color: "#8B96A5" }}>
             <span
               className="w-1.5 h-1.5 rounded-full"
               style={{
                 background: connColor,
                 animation: connLabel === "LIVE" ? "pulse 2s infinite" : undefined,
-                boxShadow: connLabel === "LIVE" ? "0 0 6px #00ff8888" : undefined,
+                boxShadow: connLabel === "LIVE" ? "0 0 6px #10B98188" : undefined,
               }}
             />
             {connLabel}
           </span>
 
           {/* Step counter */}
-          <span className="text-xs font-mono" style={{ color: "#64748b" }}>
+          <span className="text-xs font-mono" style={{ color: "#8B96A5" }}>
             {doneCount}/{AGENT_PIPELINE.length} agents
           </span>
         </div>
@@ -346,13 +373,13 @@ export default function ScanProgress({ activeNode, status, done, error, errorKin
       {/* ── Overall progress bar ── */}
       <div className="px-5 pt-4 pb-2">
         <div className="flex items-center justify-between mb-1.5">
-          <span className="text-xs" style={{ color: "#64748b" }}>
+          <span className="text-xs" style={{ color: "#8B96A5" }}>
             {headerLabel}
           </span>
           <span
             className="text-xs font-mono tabular-nums"
             style={{
-              color: done ? "#00ff88" : error ? errSolid : "#00d4ff",
+              color: done ? "#10B981" : error ? errSolid : "#60A5FA",
               transition: "color 0.5s",
             }}
           >
@@ -363,20 +390,20 @@ export default function ScanProgress({ activeNode, status, done, error, errorKin
         {/* Track */}
         <div
           className="w-full rounded-full overflow-hidden"
-          style={{ height: "4px", background: "#1e1e2e" }}
+          style={{ height: "4px", background: "#1F2833" }}
         >
           <div
             style={{
               height:     "100%",
               width:      `${overallProgress}%`,
               background: done
-                ? "linear-gradient(90deg, #00d4ff, #00ff88)"
+                ? "linear-gradient(90deg, #60A5FA, #10B981)"
                 : error
                 ? `linear-gradient(90deg, rgb(${errHue}), rgba(${errHue},0.65))`
-                : "linear-gradient(90deg, #00d4ff, #0099bb)",
+                : "linear-gradient(90deg, #60A5FA, #3B82F6)",
               transition: "width 0.6s cubic-bezier(0.4,0,0.2,1), background 0.5s",
               borderRadius: "9999px",
-              boxShadow: overallProgress > 0 ? "0 0 8px rgba(0,212,255,0.5)" : "none",
+              boxShadow: overallProgress > 0 ? "0 0 8px rgba(31,95,163,0.5)" : "none",
             }}
           />
         </div>
@@ -403,15 +430,23 @@ export default function ScanProgress({ activeNode, status, done, error, errorKin
           </svg>
           <div className="flex-1 min-w-0">
             <p className="text-xs font-medium mb-1" style={{ color: errSolid }}>
-              {opFault ? "AI backend unavailable" : "Scan error"}
+              {wasInterrupted ? "Run interrupted" : opFault ? "AI backend unavailable" : "Scan error"}
             </p>
             <p className="text-xs break-words" style={{ color: `rgba(${errHue},0.6)` }}>
               {error}
             </p>
-            {opFault && (
+            {opFault && !wasInterrupted && (
               <p className="text-xs mt-1.5 break-words" style={{ color: `rgba(${errHue},0.45)` }}>
                 This is a configuration problem in the deployment, not a fault in the scan
                 pipeline. Check the provider API key and its remaining quota.
+              </p>
+            )}
+            {wasInterrupted && (
+              <p className="text-xs mt-1.5 break-words" style={{ color: `rgba(${errHue},0.45)` }}>
+                The server restarted or stopped while this run was in flight. This is not
+                an API-key or quota problem — work completed so far is preserved under
+                this run ID. For long runs, start the backend with auto-reload off
+                (run.ps1 -NoReload) and avoid restarting it mid-run, then retry.
               </p>
             )}
           </div>
@@ -431,7 +466,7 @@ export default function ScanProgress({ activeNode, status, done, error, errorKin
                 (e.currentTarget as HTMLButtonElement).style.background = `rgba(${errHue},0.12)`
               }}
             >
-              Retry Scan
+              {retryLabel ?? "Retry Scan"}
             </button>
           )}
         </div>
@@ -449,16 +484,16 @@ export default function ScanProgress({ activeNode, status, done, error, errorKin
         <div
           className="mx-5 mb-5 rounded-xl px-4 py-3 flex items-center gap-3"
           style={{
-            background: "rgba(0,255,136,0.06)",
-            border:     "1px solid rgba(0,255,136,0.2)",
+            background: "rgba(11,122,75,0.06)",
+            border:     "1px solid rgba(11,122,75,0.2)",
             animation:  "fadeIn 0.5s ease-out",
           }}
         >
           <svg className="w-4 h-4 shrink-0" viewBox="0 0 20 20" fill="none">
-            <circle cx="10" cy="10" r="9" fill="rgba(0,255,136,0.15)" stroke="#00ff88" strokeWidth="1.5" />
-            <path d="M6.5 10.5l2.5 2.5 4.5-5" stroke="#00ff88" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            <circle cx="10" cy="10" r="9" fill="rgba(11,122,75,0.15)" stroke="#10B981" strokeWidth="1.5" />
+            <path d="M6.5 10.5l2.5 2.5 4.5-5" stroke="#10B981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
-          <p className="text-xs" style={{ color: "#00ff88" }}>
+          <p className="text-xs" style={{ color: "#10B981" }}>
             All agents complete · scrolling to results…
           </p>
         </div>

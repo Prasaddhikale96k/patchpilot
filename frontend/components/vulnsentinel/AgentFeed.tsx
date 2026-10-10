@@ -8,39 +8,45 @@ interface Props {
 }
 
 const AGENT_STYLES: Record<string, { color: string; icon: string }> = {
-  Orchestrator:    { color: "text-blue-400",       icon: "○" },
+  Orchestrator:    { color: "text-blue-300",       icon: "○" },
   Scanner:         { color: "text-sentinel-cyan",  icon: "○" },
-  VulnAnalyzer:    { color: "text-yellow-400",     icon: "○" },
-  ExploitReasoner: { color: "text-orange-400",     icon: "○" },
-  FixSuggester:    { color: "text-green-400",      icon: "○" },
-  ReportGenerator: { color: "text-purple-400",     icon: "○" },
-  SessionMonitor:  { color: "text-blue-400",       icon: "○" },
-  BehaviorAnalyzer:{ color: "text-yellow-400",     icon: "○" },
-  AnomalyScorer:   { color: "text-orange-400",     icon: "○" },
-  AlertGenerator:  { color: "text-red-400",        icon: "○" },
+  VulnAnalyzer:    { color: "text-yellow-300",     icon: "○" },
+  ExploitReasoner: { color: "text-orange-300",     icon: "○" },
+  FixSuggester:    { color: "text-green-300",      icon: "○" },
+  ReportGenerator: { color: "text-purple-300",     icon: "○" },
+  SessionMonitor:  { color: "text-blue-300",       icon: "○" },
+  BehaviorAnalyzer:{ color: "text-yellow-300",     icon: "○" },
+  AnomalyScorer:   { color: "text-orange-300",     icon: "○" },
+  AlertGenerator:  { color: "text-red-300",        icon: "○" },
 }
 
 function parseLine(log: string): { style: { color: string; icon: string }; text: string } {
   const match = log.match(/\[([^\]]+)\]/)
   if (match) {
     const key = match[1].replace(/\s/g, "")
-    const style = AGENT_STYLES[key] ?? { color: "text-slate-400", icon: "·" }
+    const style = AGENT_STYLES[key] ?? { color: "text-ink-muted", icon: "·" }
     return { style, text: log }
   }
   if (log.includes("ERROR") || log.includes("CRITICAL"))
     return { style: { color: "text-sentinel-red", icon: "x" }, text: log }
-  return { style: { color: "text-slate-400", icon: "·" }, text: log }
+  return { style: { color: "text-ink-muted", icon: "·" }, text: log }
 }
 
 export default function AgentFeed({ logs, isRunning }: Props) {
-  const endRef = useRef<HTMLDivElement>(null)
+  const boxRef = useRef<HTMLDivElement>(null)
 
+  // Follow new log lines only inside the log box — never the whole page —
+  // and only when the reader is already near the bottom, so scrolled-up
+  // history is never yanked away.
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" })
+    const box = boxRef.current
+    if (!box) return
+    const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 96
+    if (nearBottom) box.scrollTo({ top: box.scrollHeight, behavior: "smooth" })
   }, [logs])
 
   return (
-    <div className="flex flex-col h-full bg-[#0a0a0f] border border-sentinel-border rounded-xl overflow-hidden">
+    <div className="flex flex-col bg-paper border border-sentinel-border rounded-xl overflow-hidden">
       {/* Title bar */}
       <div className="flex items-center gap-2 px-4 py-2.5 border-b border-sentinel-border bg-sentinel-surface shrink-0">
         <span className="w-3 h-3 rounded-full bg-red-500/80" />
@@ -58,8 +64,11 @@ export default function AgentFeed({ logs, isRunning }: Props) {
         )}
       </div>
 
-      {/* Log lines */}
-      <div className="flex-1 overflow-y-auto p-4 font-mono text-[13px] leading-6 space-y-0.5">
+      {/* Log lines — the one deliberate inner scroll container, with a
+          clear boundary (title bar + rounded panel) and a fixed cap so
+          long runs never stretch the page indefinitely. */}
+      <div ref={boxRef} role="log" aria-label="Agent execution logs"
+           className="max-h-[50vh] lg:max-h-[70vh] overflow-y-auto p-4 font-mono text-[13px] leading-6 space-y-0.5">
         {logs.length === 0 && (
           <p className="text-sentinel-muted">Waiting for agents to initialise...</p>
         )}
@@ -80,7 +89,6 @@ export default function AgentFeed({ logs, isRunning }: Props) {
             <span className="cursor" />
           </div>
         )}
-        <div ref={endRef} />
       </div>
     </div>
   )

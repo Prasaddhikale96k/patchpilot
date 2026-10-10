@@ -9,7 +9,46 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
+        // Light editorial theme. Accents are darkened so they stay ≥4.5:1
+        // as text on cream; the pastel card fills live under `bento`.
         sentinel: {
+          bg:      "#F5F0E2",
+          surface: "#FFFCF3",
+          border:  "#E2D9C3",
+          green:   "#0B7A4B",
+          cyan:    "#1F5FA3",
+          red:     "#C2185B",
+          yellow:  "#8A6100",
+          purple:  "#5B3FC4",
+          muted:   "#5E5747",
+        },
+        ink: {
+          DEFAULT: "#111111",
+          soft:    "#2B2925",
+          muted:   "#5E5747",
+        },
+        cream: "#F5F0E2",
+        paper: "#FFFCF3",
+        line:  "#E2D9C3",
+        bento: {
+          lavender: "#B5A0EA",
+          pink:     "#FA4386",
+          blue:     "#A4C5E5",
+          peach:    "#FFA778",
+          mustard:  "#E8BC47",
+        },
+        // PatchPilot dark console tokens (landing + proof UI).
+        bg:      "#0A0E12",
+        surface: "#11161B",
+        border:  "#1F2833",
+        "text-primary": "#F5F7FA",
+        "text-muted":   "#8B96A5",
+        accent:  "#10B981",
+        danger:  "#EF4444",
+        warning: "#F59E0B",
+        info:    "#3B82F6",
+        // Original dark palette, kept only for the (hidden) ExamGuard module.
+        legacy: {
           bg:      "#0a0a0f",
           surface: "#111118",
           border:  "#1e1e2e",
@@ -21,7 +60,20 @@ const config: Config = {
           muted:   "#64748b",
         },
       },
+      borderRadius: {
+        bento: "1.75rem",
+        md: "0.5rem",
+        lg: "0.75rem",
+        xl: "1rem",
+      },
+      boxShadow: {
+        card: "0 1px 0 rgba(17,17,17,0.06)",
+        "glow-emerald": "0 0 24px -6px rgba(16,185,129,0.45)",
+        "glow-red": "0 0 24px -6px rgba(239,68,68,0.45)",
+        lift: "0 14px 30px -18px rgba(17,17,17,0.45)",
+      },
       fontFamily: {
+        sans: ["Inter", "system-ui", "-apple-system", "Segoe UI", "sans-serif"],
         mono: ["'JetBrains Mono'", "Menlo", "Monaco", "Consolas", "monospace"],
       },
       backdropBlur: {

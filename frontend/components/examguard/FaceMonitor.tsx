@@ -162,19 +162,19 @@ export default function FaceMonitor({ onFaceEvent, onPhoneEvent, active }: Props
 
   if (camError) {
     return (
-      <div className="aspect-video rounded-xl bg-sentinel-surface border border-sentinel-border flex flex-col items-center justify-center gap-2">
-        <svg className="w-8 h-8 text-sentinel-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <div className="aspect-video rounded-xl bg-legacy-surface border border-legacy-border flex flex-col items-center justify-center gap-2">
+        <svg className="w-8 h-8 text-legacy-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z"/>
         </svg>
-        <p className="text-sentinel-muted text-xs">{camError}</p>
+        <p className="text-legacy-muted text-xs">{camError}</p>
       </div>
     )
   }
 
   const faceStatusColor =
-    faceCount === null ? "text-sentinel-muted" :
-    faceCount === 1    ? "text-sentinel-green"  :
-    faceCount === 0    ? "text-sentinel-red"    : "text-orange-400"
+    faceCount === null ? "text-legacy-muted" :
+    faceCount === 1    ? "text-legacy-green"  :
+    faceCount === 0    ? "text-legacy-red"    : "text-orange-400"
 
   const faceStatusText =
     faceCount === null ? "—" :
@@ -183,30 +183,30 @@ export default function FaceMonitor({ onFaceEvent, onPhoneEvent, active }: Props
 
   return (
     <div className="space-y-1">
-      <div className="relative aspect-video rounded-xl overflow-hidden bg-black border border-sentinel-border">
+      <div className="relative aspect-video rounded-xl overflow-hidden bg-black border border-legacy-border">
         <video ref={videoRef} muted playsInline className="w-full h-full object-cover scale-x-[-1]" />
         <canvas ref={canvasRef} className="absolute inset-0 w-full h-full scale-x-[-1] pointer-events-none" />
 
         {!streaming && modelStatus === "loading" && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-sentinel-surface">
-            <svg className="w-5 h-5 animate-spin text-sentinel-muted" fill="none" viewBox="0 0 24 24">
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-legacy-surface">
+            <svg className="w-5 h-5 animate-spin text-legacy-muted" fill="none" viewBox="0 0 24 24">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
             </svg>
-            <p className="text-xs text-sentinel-muted font-mono">Loading AI model…</p>
+            <p className="text-xs text-legacy-muted font-mono">Loading AI model…</p>
           </div>
         )}
 
         {modelStatus === "error" && (
-          <div className="absolute inset-0 flex items-center justify-center bg-sentinel-surface">
-            <p className="text-xs text-sentinel-red font-mono">Face model failed to load</p>
+          <div className="absolute inset-0 flex items-center justify-center bg-legacy-surface">
+            <p className="text-xs text-legacy-red font-mono">Face model failed to load</p>
           </div>
         )}
 
         {streaming && (
           <div className="absolute bottom-2 right-2 flex items-center gap-1.5 bg-black/60 rounded-full px-2 py-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-sentinel-green animate-pulse" />
-            <span className="text-[10px] font-mono text-sentinel-green">LIVE</span>
+            <span className="w-1.5 h-1.5 rounded-full bg-legacy-green animate-pulse" />
+            <span className="text-[10px] font-mono text-legacy-green">LIVE</span>
           </div>
         )}
 

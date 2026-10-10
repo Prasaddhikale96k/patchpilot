@@ -4,9 +4,14 @@
 @tailwind components;
 @tailwind utilities;
 
-:root { 
-  color-scheme: dark; 
-  --tw-text-opacity: 1;
+/* ── Light editorial theme ────────────────────────────────────────────── */
+:root {
+  color-scheme: dark;
+  --cream: #0A0E12;
+  --paper: #11161B;
+  --line:  #1F2833;
+  --ink:   #F5F7FA;
+  --ink-muted: #8B96A5;
 }
 
 html, body {
@@ -16,62 +21,31 @@ html, body {
 }
 
 body {
-  background: linear-gradient(135deg, #0a0a0f 0%, #1a1a2e 50%, #0f0f1f 100%);
-  background-attachment: fixed;
-  color: #e2e8f0;
+  background: var(--cream);
+  color: var(--ink);
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   line-height: 1.6;
-  letter-spacing: 0.3px;
 }
 
-/* Animated background gradient */
-@supports (background-attachment: fixed) {
-  body::before {
-    content: "";
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: radial-gradient(ellipse at 20% 50%, rgba(0, 212, 255, 0.05) 0%, transparent 50%),
-                radial-gradient(ellipse at 80% 80%, rgba(168, 85, 247, 0.05) 0%, transparent 50%);
-    pointer-events: none;
-    z-index: -1;
-  }
+/* Visible, consistent keyboard focus everywhere */
+:focus-visible {
+  outline: 3px solid #10B981;
+  outline-offset: 2px;
+  border-radius: 6px;
 }
 
-/* Scrollbar */
-::-webkit-scrollbar { 
-  width: 8px; 
-  height: 8px; 
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgba(245, 247, 250, 0.2);
+  border-radius: 999px;
+  border: 2px solid var(--cream);
 }
+::-webkit-scrollbar-thumb:hover { background: rgba(245, 247, 250, 0.35); }
 
-::-webkit-scrollbar-track { 
-  background: rgba(17, 17, 24, 0.5); 
-}
-
-::-webkit-scrollbar-thumb { 
-  background: linear-gradient(180deg, rgba(0, 212, 255, 0.3), rgba(168, 85, 247, 0.3));
-  border-radius: 4px; 
-  transition: background 0.3s ease;
-}
-
-::-webkit-scrollbar-thumb:hover { 
-  background: linear-gradient(180deg, rgba(0, 212, 255, 0.6), rgba(168, 85, 247, 0.6)); 
-}
-
-/* Selection */
-::selection {
-  background-color: rgba(0, 212, 255, 0.3);
-  color: #e2e8f0;
-}
-
-::-moz-selection {
-  background-color: rgba(0, 212, 255, 0.3);
-  color: #e2e8f0;
-}
+::selection { background-color: #10B981; color: #0A0E12; }
 
 /* Terminal cursor */
 .cursor::after {
@@ -84,182 +58,88 @@ body {
   50%       { opacity: 0; }
 }
 
-/* Severity pills */
-.pill-critical { @apply bg-red-500/15 text-red-400 border border-red-500/30 px-2.5 py-1 rounded-full text-xs font-mono font-semibold; }
-.pill-high     { @apply bg-orange-500/15 text-orange-400 border border-orange-500/30 px-2.5 py-1 rounded-full text-xs font-mono font-semibold; }
-.pill-medium   { @apply bg-yellow-500/15 text-yellow-400 border border-yellow-500/30 px-2.5 py-1 rounded-full text-xs font-mono font-semibold; }
-.pill-low      { @apply bg-blue-500/15 text-blue-400 border border-blue-500/30 px-2.5 py-1 rounded-full text-xs font-mono font-semibold; }
-.pill-info     { @apply bg-cyan-500/15 text-cyan-400 border border-cyan-500/30 px-2.5 py-1 rounded-full text-xs font-mono font-semibold; }
+/* Severity pills (≥4.5:1 text on their tint) */
+.pill-critical { @apply bg-red-500/15 text-red-300 border border-red-500/40 px-2.5 py-1 rounded-full text-xs font-mono font-semibold; }
+.pill-high     { @apply bg-orange-500/15 text-orange-300 border border-orange-500/40 px-2.5 py-1 rounded-full text-xs font-mono font-semibold; }
+.pill-medium   { @apply bg-yellow-500/15 text-yellow-300 border border-yellow-500/40 px-2.5 py-1 rounded-full text-xs font-mono font-semibold; }
+.pill-low      { @apply bg-blue-500/15 text-blue-300 border border-blue-500/40 px-2.5 py-1 rounded-full text-xs font-mono font-semibold; }
+.pill-info     { @apply bg-sky-500/15 text-sky-300 border border-sky-500/40 px-2.5 py-1 rounded-full text-xs font-mono font-semibold; }
 
-/* Glassmorphic card */
+/* Paper card (kept under its historical name) */
 .glass-card {
-  @apply relative bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl 
-         transition-all duration-300 ease-out
-         hover:bg-white/10 hover:border-white/20 hover:shadow-2xl
-         hover:shadow-cyan-500/10;
-  
-  /* Subtle glow effect */
-  box-shadow: 
-    0 8px 32px rgba(0, 0, 0, 0.1),
-    inset 0 1px 1px rgba(255, 255, 255, 0.1),
-    0 0 1px rgba(0, 212, 255, 0.1);
+  @apply relative bg-paper border border-line rounded-xl transition-shadow duration-200;
 }
 
-.glass-card:hover {
-  box-shadow: 
-    0 20px 48px rgba(0, 212, 255, 0.15),
-    inset 0 1px 1px rgba(255, 255, 255, 0.15),
-    0 0 2px rgba(0, 212, 255, 0.2);
-}
-
-/* Premium input */
 .input-glass {
-  @apply w-full px-4 py-3 bg-white/5 backdrop-blur-sm border border-white/10 
-         rounded-xl text-sm placeholder:text-slate-500
-         focus:outline-none focus:bg-white/10 focus:border-cyan-400/50 focus:ring-2 focus:ring-cyan-400/10
-         transition-all duration-300;
+  @apply w-full px-4 py-3 bg-bg border border-line rounded-lg text-base text-ink
+         placeholder:text-ink-muted
+         focus:outline-none focus:border-accent
+         transition-colors duration-150;
 }
 
-.input-glass::placeholder {
-  color: rgba(148, 163, 184, 0.6);
-}
-
-/* Premium button */
-.btn-glass {
-  @apply relative px-6 py-3 rounded-xl font-medium text-sm
-         bg-gradient-to-r from-cyan-500/20 to-purple-500/20
-         border border-cyan-400/30 text-white
-         hover:from-cyan-500/40 hover:to-purple-500/40 hover:border-cyan-400/60
-         focus:outline-none focus:ring-2 focus:ring-cyan-400/50
-         transition-all duration-300
-         disabled:opacity-50 disabled:cursor-not-allowed;
-  
-  overflow: hidden;
-}
-
-.btn-glass::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: -100%;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
-  transition: left 0.5s;
-}
-
-.btn-glass:hover::before {
-  left: 100%;
-}
-
-/* Premium button variant - solid */
+/* Buttons: solid ink pill, outlined pill */
 .btn-primary {
-  @apply px-6 py-3 rounded-xl font-medium text-sm
-         bg-gradient-to-r from-cyan-500 to-blue-500
-         text-white font-semibold
-         hover:shadow-lg hover:shadow-cyan-500/50
-         focus:outline-none focus:ring-2 focus:ring-cyan-400/50
-         transition-all duration-300
+  @apply inline-flex items-center justify-center gap-2 px-6 py-3 rounded-lg text-base font-semibold
+         bg-accent text-bg border border-accent
+         hover:bg-accent/90
+         transition duration-150
+         disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-none;
+}
+
+.btn-secondary,
+.btn-glass {
+  @apply inline-flex items-center justify-center gap-2 px-6 py-3 rounded-lg text-base font-semibold
+         bg-transparent text-ink border border-line
+         hover:bg-paper
+         transition-colors duration-150
          disabled:opacity-50 disabled:cursor-not-allowed;
 }
 
-.btn-secondary {
-  @apply px-6 py-3 rounded-xl font-medium text-sm
-         bg-white/10 border border-white/20
-         text-white
-         hover:bg-white/20 hover:border-white/30
-         focus:outline-none focus:ring-2 focus:ring-white/30
-         transition-all duration-300
-         disabled:opacity-50 disabled:cursor-not-allowed;
-}
-
-/* Premium badge */
 .badge-gradient {
-  @apply inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg
-         bg-gradient-to-r from-cyan-500/20 to-purple-500/20
-         border border-cyan-400/20
-         text-xs font-semibold text-cyan-300;
+  @apply inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full
+         bg-bento-lavender/50 border border-ink/10 text-xs font-semibold text-ink;
 }
 
-/* Animated gradient text */
-.gradient-text {
-  background: linear-gradient(90deg, #00d4ff, #a855f7, #00ff88);
-  background-size: 200% auto;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  animation: gradientShift 6s ease-in-out infinite;
+.gradient-text { color: var(--ink); }
+.glow-cyan, .glow-purple, .glow-green { filter: none; }
+
+.separator-glow { @apply h-px bg-line; }
+
+/* Bento card hover: a small lift, nothing more */
+.bento-card {
+  @apply relative rounded-xl p-6 sm:p-7 text-ink border border-line
+         transition duration-200 ease-out;
+}
+.bento-card[data-interactive="true"]:hover,
+.bento-card[data-interactive="true"]:focus-within {
+  @apply border-accent/50;
 }
 
-/* Glow effect */
-.glow-cyan {
-  filter: drop-shadow(0 0 8px rgba(0, 212, 255, 0.5));
-}
-
-.glow-purple {
-  filter: drop-shadow(0 0 8px rgba(168, 85, 247, 0.5));
-}
-
-.glow-green {
-  filter: drop-shadow(0 0 8px rgba(0, 255, 136, 0.5));
-}
-
-/* Separator line with glow */
-.separator-glow {
-  @apply h-px bg-gradient-to-r from-transparent via-cyan-500/50 to-transparent;
-}
-
-/* Code block styling */
+/* Code */
 code, pre {
   font-family: 'JetBrains Mono', monospace;
 }
 
 pre {
-  @apply bg-black/30 border border-white/10 rounded-lg p-4 overflow-x-auto;
-  background: linear-gradient(135deg, rgba(0, 0, 0, 0.3) 0%, rgba(0, 20, 40, 0.3) 100%);
+  @apply bg-paper border border-line rounded-xl p-4 overflow-x-auto text-ink;
 }
 
-/* Scrollable area */
-.scrollable-area {
-  @apply overflow-y-auto;
+.scrollable-area { @apply overflow-y-auto; }
+.scrollable-area::-webkit-scrollbar { width: 6px; }
+.scrollable-area::-webkit-scrollbar-thumb { background: rgba(245, 247, 250, 0.2); border-radius: 3px; }
+
+.skeleton {
+  @apply rounded-xl bg-ink/10;
+  animation: pulse 1.6s ease-in-out infinite;
 }
 
-.scrollable-area::-webkit-scrollbar {
-  width: 6px;
-}
-
-.scrollable-area::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.scrollable-area::-webkit-scrollbar-thumb {
-  background: rgba(0, 212, 255, 0.2);
-  border-radius: 3px;
-}
-
-.scrollable-area::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 212, 255, 0.4);
-}
-
-/* Responsive utility */
 @media (max-width: 640px) {
-  body {
-    font-size: 15px;
-  }
-  
-  .glass-card {
-    border-radius: 1rem;
-  }
+  body { font-size: 15px; }
+  .glass-card { border-radius: 1.25rem; }
 }
 
-/* Animation utilities */
-.animate-in {
-  animation: slideUp 0.5s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.animate-subtle {
-  animation: fadeIn 0.4s ease-out;
-}
+.animate-in { animation: slideUp 0.35s cubic-bezier(0.16, 1, 0.3, 1); }
+.animate-subtle { animation: fadeIn 0.3s ease-out; }
 
 /* ScanProgress animations (used by ScanProgress.tsx) */
 @keyframes fadeIn {
@@ -271,3 +151,40 @@ pre {
   0%, 100% { opacity: 1; }
   50%       { opacity: 0.4; }
 }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .bento-card[data-interactive="true"]:hover,
+  .btn-primary:hover { transform: none; }
+}
+
+/* ── Legacy dark theme, scoped to the hidden ExamGuard module ─────────── */
+.legacy-theme {
+  color-scheme: dark;
+  background: linear-gradient(135deg, #0a0a0f 0%, #1a1a2e 50%, #0f0f1f 100%);
+  color: #e2e8f0;
+}
+.legacy-theme .glass-card {
+  @apply bg-white/5 border-white/10 rounded-2xl backdrop-blur-xl;
+}
+.legacy-theme .input-glass {
+  @apply bg-white/5 border border-white/10 rounded-xl text-slate-200 placeholder:text-slate-500
+         focus:border-cyan-400/50;
+}
+.legacy-theme .btn-primary {
+  @apply rounded-xl bg-gradient-to-r from-cyan-500 to-blue-500 text-white border-0;
+}
+.legacy-theme .btn-secondary,
+.legacy-theme .btn-glass {
+  @apply rounded-xl bg-white/10 border border-white/20 text-white hover:bg-white/20;
+}
+.legacy-theme pre { @apply bg-black/30 border-white/10 text-slate-200; }
+.legacy-theme .pill-critical { @apply bg-red-500/15 text-red-300 border border-red-500/40 px-2.5 py-1 rounded-full text-xs font-mono font-semibold; }
+.legacy-theme .pill-high     { @apply bg-orange-500/15 text-orange-300 border border-orange-500/40 px-2.5 py-1 rounded-full text-xs font-mono font-semibold; }
+.legacy-theme .pill-medium   { @apply bg-yellow-500/15 text-yellow-300 border border-yellow-500/40 px-2.5 py-1 rounded-full text-xs font-mono font-semibold; }
+.legacy-theme .pill-low      { @apply bg-blue-500/15 text-blue-300 border border-blue-500/40 px-2.5 py-1 rounded-full text-xs font-mono font-semibold; }
