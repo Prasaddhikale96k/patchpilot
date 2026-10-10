@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 
-interface Perf { before_s: number; after_s: number; date?: string }
+interface Perf { before_s: number; after_s: number; runs?: number; date?: string }
 
 const valid = (p: unknown): p is Perf => {
   const o = p as Perf
@@ -36,7 +36,7 @@ export function SpeedSection() {
           <div className="mb-1 flex justify-between text-base"><span>Parallel agents</span><span className="font-mono text-accent">{perf.after_s.toFixed(0)} s</span></div>
           <div className="h-5 rounded-full bg-bg"><div className="h-5 rounded-full bg-accent" style={{ width: `${pct}%` }} /></div>
         </div>
-        <p className="text-base text-text-muted">Measured on the vulnbank demo repo{perf.date ? ` (${perf.date})` : ""}.</p>
+        <p className="text-base text-text-muted">Mean of {perf.runs ?? 1} measured scan{(perf.runs ?? 1) > 1 ? "s" : ""} of the vulnbank demo repo{perf.date ? ` (${perf.date})` : ""}. LLM speed varies between runs.</p>
       </div>
     </section>
   )

@@ -79,6 +79,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 
 from agents.orchestrator import _graph, _initial_state
+from agents.squad import set_lane_sink
 from agents.llm_router import LLMUnavailableError
 from tools.url_guard import assert_safe_target, UnsafeTargetError
 from tools.git_cloner import cleanup_repo, _repo_dest
@@ -519,6 +520,17 @@ async def _run_scan(repo_url: str, scan_id: str, create_pr: bool = False,
         config = {"configurable": {"thread_id": scan_id},
                   "recursion_limit": GRAPH_RECURSION_LIMIT}
 
+        # Specialist-squad lanes stream live: worker threads hand each log
+        # line to the event loop, tagged with its lane for the UI.
+        loop = asyncio.get_running_loop()
+
+        def _lane_sink(lane: str, line: str) -> None:
+            asyncio.run_coroutine_threadsafe(_publish(scan_id, {
+                "type": "update", "node": "vuln_analyzer", "lane": lane,
+                "logs": [line], "status": "", "scan_id": scan_id}), loop)
+
+        set_lane_sink(scan_id, _lane_sink)
+
         async with asyncio.timeout(SCAN_TIMEOUT_SECS):
             async for event in _graph.astream(state, config=config):
                 node_name, node_output = next(iter(event.items()))
@@ -594,6 +606,7 @@ async def _run_scan(repo_url: str, scan_id: str, create_pr: bool = False,
     finally:
         beat.cancel()
         cleanup_repo(scan_id)  # remove cloned repo, if any
+        set_lane_sink(scan_id, None)
         await _publish(scan_id, None)  # sentinel — unblocks WebSocket readers
 
 

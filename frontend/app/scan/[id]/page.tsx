@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import AgentFeed from "@/components/vulnsentinel/AgentFeed"
 import VulnCard from "@/components/vulnsentinel/VulnCard"
 import ScanProgress from "@/components/vulnsentinel/ScanProgress"
+import ParallelLanes, { type LaneState } from "@/components/vulnsentinel/ParallelLanes"
 import ExportPDFButton from "@/components/vulnsentinel/ExportPDFButton"
 import RemediationPanel from "@/components/vulnsentinel/RemediationPanel"
 import type { RemediationSection } from "@/lib/remediation"
@@ -46,6 +47,7 @@ export default function ScanDashboard({ params }: { params: { id: string } }) {
   const [report, setReport]       = useState<Report | null>(null)
   const [activeNode, setActiveNode] = useState<string>("")
   const [seenNodes, setSeenNodes] = useState<string[]>([])
+  const [lanes, setLanes]         = useState<Record<string, LaneState>>({})
   const [scanDone, setScanDone]   = useState(false)
   const [scanError, setScanError] = useState<string | null>(null)
   const [scanErrorKind, setScanErrorKind] = useState<string | null>(null)
@@ -81,6 +83,13 @@ export default function ScanDashboard({ params }: { params: { id: string } }) {
     if (msg.type === "update") {
       const newLogs = (msg.logs as string[]) ?? []
       setLogs((prev) => [...prev, ...newLogs])
+      if (typeof msg.lane === "string") {
+        const lane = msg.lane as string
+        setLanes((prev) => ({
+          ...prev,
+          [lane]: { lines: (prev[lane]?.lines ?? 0) + newLogs.length, last: newLogs[newLogs.length - 1] ?? prev[lane]?.last ?? "", done: false },
+        }))
+      }
       setActiveNode(msg.node as string)
       setSeenNodes((prev) => prev.includes(msg.node as string) ? prev : [...prev, msg.node as string])
       setFeed("live")
@@ -341,6 +350,7 @@ export default function ScanDashboard({ params }: { params: { id: string } }) {
           {/* AgentFeed — natural height; the log box inside scrolls
               within its own deliberate max-height. */}
           <div className="p-4">
+            <ParallelLanes lanes={isRunning ? lanes : Object.fromEntries(Object.entries(lanes).map(([k, v]) => [k, { ...v, done: true }]))} />
             <AgentFeed logs={logs} isRunning={isRunning} />
           </div>
         </div>

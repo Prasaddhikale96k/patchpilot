@@ -4,9 +4,9 @@ Coordinates all security scanning agents in a directed acyclic pipeline.
 
 Graph shape:
   orchestrator → scanner → logic_auditor → vuln_analyzer → exploit_reasoner
-      → fix_suggester → secure_coder → tester → pr_creator → report_generator
+      → fix_suggester → secure_coder → reviewer → tester → pr_creator
                           ↘                ↘         ↘ (retry loop ≤3)
-                        (no findings)   (no vulns)  (failed, attempts left)
+                        (no findings)   (no vulns)  (rejected/failed, attempts left)
                                 ↘         ↘         ↘
                                report_generator → END
 """
@@ -28,6 +28,8 @@ from langgraph.graph import END, StateGraph
 from .llm_router import active_model_label, invoke_llm, llm_pool
 from .remediation.logic_auditor import logic_auditor_node
 from .remediation.pr_creator import pr_creator_node
+from .remediation.report import build_remediation_section
+from .remediation.reviewer import reviewer_node
 from .remediation.secure_coder import match_hint, secure_coder_node
 from .remediation.tester import tester_node
 from .state import ScanState
@@ -713,11 +715,49 @@ def _scan_github(state: ScanState) -> dict:
                 return [], _time.perf_counter() - start, str(exc)
             return result, _time.perf_counter() - start, None
 
-        with _Pool(max_workers=2) as _ex:
+        parallel = parallel_agents_enabled()
+
+        def _timed_logic_audit() -> tuple[dict, float]:
+            from agents.remediation.logic_auditor import audit_repo
+            start = _time.perf_counter()
+            try:
+                return audit_repo(repo_path), _time.perf_counter() - start
+            except Exception as exc:  # isolated: never sinks the scan
+                logger.exception("parallel logic audit failed")
+                return ({"findings": [], "logs": [f"[LogicAuditor] ERROR: {exc}"]},
+                        _time.perf_counter() - start)
+
+        def _timed_secrets() -> tuple[list, float]:
+            from tools.secrets_scan import run_secrets_scan
+            start = _time.perf_counter()
+            try:
+                return run_secrets_scan(repo_path), _time.perf_counter() - start
+            except Exception:
+                logger.exception("secrets scan failed")
+                return [], _time.perf_counter() - start
+
+        la_future = secrets_future = None
+        with _Pool(max_workers=4 if parallel else 2) as _ex:
             _futures = [_ex.submit(_timed_bandit), _ex.submit(_timed_semgrep)]
-            (bandit_results, bandit_secs, bandit_err), \
-                (semgrep_results, semgrep_secs, semgrep_err) = \
-                [f.result() for f in _futures]
+            if parallel:
+                la_future = _ex.submit(_timed_logic_audit)
+                secrets_future = _ex.submit(_timed_secrets)
+                if state.get("create_pr"):
+                    # Warm the Docker image + baseline tests while we scan.
+                    try:
+                        from agents.remediation import baseline as _baseline
+                        _baseline.start(state["repo_url"], repo_path,
+                                        state["scan_id"])
+                    except Exception:
+                        logger.debug("speculative baseline not started",
+                                     exc_info=True)
+            (bandit_results, bandit_secs, bandit_err), (
+                semgrep_results, semgrep_secs, semgrep_err) = [
+                f.result() for f in _futures]
+            logic_audit = secrets_results = None
+            if parallel:
+                logic_audit, la_secs = la_future.result()
+                secrets_results, secrets_secs = secrets_future.result()
 
         # One failed scanner must not sink the other: continue with whatever
         # succeeded and say so. Only both failing is a scan error.
@@ -741,6 +781,15 @@ def _scan_github(state: ScanState) -> dict:
                         f"{len(semgrep_results)} issues ({semgrep_secs:.1f}s)")
         else:
             logs.append(f"[Scanner] Semgrep failed: {semgrep_err} — continuing with Bandit results")
+
+        if secrets_results:
+            # Drop secrets hits another scanner already reported nearby.
+            seen = [(f.get("file"), f.get("line", 0)) for f in raw_findings]
+            fresh = [f for f in secrets_results
+                     if not any(f["file"] == sf and abs(f["line"] - sl) <= 2
+                                for sf, sl in seen)]
+            raw_findings.extend(fresh)
+            logs.append(f"[Scanner] Secrets: {len(fresh)} issues ({secrets_secs:.1f}s)")
 
         # Test code does unsafe things deliberately, so findings against it are
         # mostly noise: a self-scan produced 231 findings, 218 of them in tests,
@@ -769,13 +818,18 @@ def _scan_github(state: ScanState) -> dict:
 
         logs.append(f"[Scanner] Total raw findings: {len(raw_findings)}")
 
-        return {
+        out = {
             "repo_path": repo_path,
             "tech_stack": tech_stack,
             "raw_findings": raw_findings,
             "status": "analyzing",
             "agent_logs": logs,
         }
+        if parallel:
+            out["logic_audit"] = logic_audit
+            logs.append(f"[Scanner] Parallel scan phase: logic audit finished "
+                        f"in {la_secs:.1f}s alongside the scanners")
+        return out
 
     except Exception as exc:
         logger.exception("GitHub scanner failed")
@@ -1017,7 +1071,7 @@ or misconfigured HTTP header, do not have CVEs: use null for those. A wrong CVE
 is far worse than no CVE, and any id that cannot be verified is discarded.
 Severity guide: CRITICAL = direct RCE/SQLi/auth bypass, HIGH = exploitable with low effort,
 MEDIUM = exploitable with moderate effort or requires chaining, LOW = hardening/best-practice.
-Output only a valid JSON array. No markdown."""),
+Output only a valid JSON array. No markdown.""" + _specialist_note()),
         HumanMessage(content=f"Analyze these raw findings:\n{findings_json}"),
     ], **model_kw)
 
@@ -1162,7 +1216,7 @@ Return a JSON array. Each object must have:
   "impact": "e.g. full database dump, RCE, account takeover",
   "poc_description": "step-by-step attack walkthrough"
 }}
-Output only a valid JSON array. Be specific and technical. No markdown."""),
+Output only a valid JSON array. Be specific and technical. No markdown.""" + _specialist_note()),
         HumanMessage(content=f"Reason about exploitability:\n{json.dumps(targets, indent=2)}"),
     ], **model_kw)
 
@@ -1214,8 +1268,16 @@ Output only a valid JSON array. Be specific and technical. No markdown."""),
 #  Node: Fix Suggester
 # ══════════════════════════════════════════════════════════════
 
+def _specialist_note() -> str:
+    """CWE-focused prompt addition when running as a squad specialist."""
+    from agents.squad import specialist_note
+    return specialist_note()
+
+
 def _snapshot_after_fix(state: ScanState, patches: list) -> None:
     """Persist the post-fix_suggester state for /api/remediate re-runs."""
+    if state.get("_squad_sub"):
+        return  # a squad lane holds only part of the findings; the merge saves
     try:
         from tools.run_artifacts import save_state
         snapshot = dict(state)
@@ -1310,6 +1372,8 @@ Return a single JSON object:
   "explanation": "what changed and why it fixes the vulnerability"
 }
 Output only valid JSON. No markdown."""
+
+    system_prompt += _specialist_note()
 
     static_host = state.get("tech_stack", {}).get("static_host")
 
@@ -1448,6 +1512,7 @@ def _unassessed_report(state: ScanState) -> dict:
         "assessed": False,
         "not_assessed_reason": reason,
         "errors": state.get("errors", []),
+        "remediation": build_remediation_section(state),
     }
     return {
         "report": report,
@@ -1480,7 +1545,10 @@ def report_generator_node(state: ScanState) -> dict:
     # fact about the findings rather than an opinion about them.
     risk = compute_risk(vulns)
 
-    response = invoke_llm([
+    from .llm_router import LLMUnavailableError
+    summary_note = ""
+    try:
+        response = invoke_llm([
         SystemMessage(content="""You are a security report writer.
 Produce an executive summary for a security audit.
 
@@ -1500,9 +1568,19 @@ Critical: {len(critical)}, High: {len(high)}
 Assessed risk: {risk['overall_risk']} ({risk['risk_score']}/100)
 Top findings: {json.dumps(vulns[:5], indent=2)}"""),
     ])
+        summary_text = response.content
+    except LLMUnavailableError as exc:
+        # The prose summary is the only model-written part of the report.
+        # Losing it must not discard the findings, verified patches and PR
+        # outcome already gathered, so fall back to a deterministic summary.
+        logger.warning("report_generator: LLM summary unavailable: %s", exc.reason)
+        summary_text = ""
+        summary_note = ("Executive summary written without a language model "
+                        "(none was reachable at report time).")
 
-    summary = _parse_json(response.content, {
-        "executive_summary": "Security scan completed. Review findings for details.",
+    summary = _parse_json(summary_text, {
+        "executive_summary": (f"Security scan completed with {len(vulns)} "
+                              f"finding(s). Review findings for details."),
         "key_recommendations": ["Review and patch all CRITICAL and HIGH findings immediately."],
     })
     if not isinstance(summary, dict):
@@ -1549,12 +1627,23 @@ Top findings: {json.dumps(vulns[:5], indent=2)}"""),
         "total_findings": len(state.get("vulnerabilities", [])),
         "assessed": True,
         "errors": state.get("errors", []),
+        # Evidence-only remediation record (outcome, diff, reviewer checks,
+        # Docker phases, PR outcome). "patches" above are suggestions; only
+        # remediation.verified means a fix was actually proven.
+        "remediation": build_remediation_section(state),
     }
+    if summary_note:
+        summary["summary_note"] = summary_note
+    remediation = report["remediation"]
 
     return {
         "report": report,
         "status": "done",
         "agent_logs": [
+            f"[ReportGenerator] Remediation: {remediation['outcome']}"
+            + (f" (verdict {remediation['test_verdict']}, PR "
+               f"{(remediation['pr'] or {}).get('status')})"
+               if remediation["outcome"] != "not_requested" else ""),
             "[ReportGenerator] Severity counts: "
             + ", ".join(f"{sev} {risk['counts'][sev]}" for sev in _VALID_SEVERITIES),
             "[ReportGenerator] Score contributions: "
@@ -1597,12 +1686,50 @@ def _route_after_vuln_analyzer(state: ScanState) -> Literal["exploit_reasoner", 
     return "exploit_reasoner"
 
 
+def _route_after_secure_coder(state: ScanState) -> Literal["reviewer", "secure_coder", "report_generator"]:
+    """A coder failure (no clone, no target, LLM down) ends remediation.
+
+    The ONE exception is a retriable patch-apply failure: the node already
+    spent one attempt (counted) and left explicit "Patch apply failed:"
+    feedback. While budget remains it retries the coder with that feedback
+    instead of abandoning the remaining attempts. Routing it to the
+    reviewer instead would loop secure_coder ↔ reviewer without ever
+    counting an attempt when the failure happened before one was recorded.
+    """
+    from .remediation.fix_queue import max_fix_attempts
+    if state.get("remediation_status") == "failed":
+        feedback = state.get("feedback") or []
+        retriable = any(isinstance(f, str) and f.startswith("Patch apply failed:")
+                        for f in feedback)
+        if retriable and (state.get("attempts", 0) or 0) < max_fix_attempts():
+            return "secure_coder"
+        return "report_generator"
+    if not state.get("code_patch"):
+        return "report_generator"
+    return "reviewer"
+
+
 def _route_after_tester(state: ScanState) -> Literal["pr_creator", "secure_coder", "report_generator"]:
-    """Prompt 04b: verified → PR placeholder; failed + attempts left → retry
-    the coder with feedback; otherwise finish at the report."""
+    """Prompt 04b: verified → PR creator; failed + attempts left → retry
+    the coder with feedback; an infrastructure error (Docker down, image
+    build failure, timeout) is not the patch's fault, so it ends the loop
+    instead of paying for another LLM attempt."""
     from .remediation.fix_queue import max_fix_attempts
     if state.get("test_verdict") == "verified":
         return "pr_creator"
+    if state.get("test_verdict") == "error":
+        return "report_generator"
+    if (state.get("attempts", 0) or 0) < max_fix_attempts():
+        return "secure_coder"
+    return "report_generator"
+
+
+def _route_after_reviewer(state: ScanState) -> Literal["tester", "secure_coder", "report_generator"]:
+    """Prompt 05: approved → tester; rejected + attempts left → retry the
+    coder with feedback; otherwise finish at the report."""
+    from .remediation.fix_queue import max_fix_attempts
+    if (state.get("review") or {}).get("approved"):
+        return "tester"
     if (state.get("attempts", 0) or 0) < max_fix_attempts():
         return "secure_coder"
     return "report_generator"
@@ -1612,19 +1739,77 @@ def _route_after_tester(state: ScanState) -> Literal["pr_creator", "secure_coder
 #  Graph assembly
 # ══════════════════════════════════════════════════════════════
 
+def vuln_analyzer_stage(state: ScanState) -> dict:
+    """With PARALLEL_AGENTS the specialist squad runs analyzer -> exploit ->
+    fix per bug family concurrently; otherwise the old single-node path."""
+    from agents.squad import run_squad, squad_applicable
+    if squad_applicable(state):
+        return run_squad(state)
+    return vuln_analyzer_node(state)
+
+
+def exploit_reasoner_stage(state: ScanState) -> dict:
+    if state.get("squad_done"):
+        return {"status": "patching",
+                "agent_logs": ["[ExploitReasoner] Done by the specialist squad."]}
+    return exploit_reasoner_node(state)
+
+
+def fix_suggester_stage(state: ScanState) -> dict:
+    if state.get("squad_done"):
+        return {"status": "reporting",
+                "agent_logs": ["[FixSuggester] Done by the specialist squad."]}
+    return fix_suggester_node(state)
+
+
+def parallel_agents_enabled() -> bool:
+    """PARALLEL_AGENTS=0 restores the old sequential scan path."""
+    return os.getenv("PARALLEL_AGENTS", "1").strip().lower() not in ("0", "false", "no", "off")
+
+
+def _timed_node(name: str, fn):
+    """Record the node's wall time in state["timings"] and log it."""
+    import functools
+    import time as _time
+
+    @functools.wraps(fn)
+    def wrapper(state):
+        start = _time.perf_counter()
+        out = fn(state)
+        secs = _time.perf_counter() - start
+        if not isinstance(out, dict):
+            return out
+        timings = dict(state.get("timings") or {})
+        timings[name] = round(timings.get(name, 0.0) + secs, 2)
+        out = dict(out)
+        out["timings"] = timings
+        out["agent_logs"] = list(out.get("agent_logs") or []) + [
+            f"[Timing] {name} {secs:.1f}s"]
+        try:
+            import json as _json
+            from tools.run_artifacts import save_text
+            save_text(state.get("scan_id", "unknown"), "timings.json",
+                      _json.dumps(timings, indent=2))
+        except Exception:
+            logger.debug("timings.json not written", exc_info=True)
+        return out
+    return wrapper
+
+
 def build_graph() -> StateGraph:
     graph = StateGraph(ScanState)
 
-    graph.add_node("orchestrator", orchestrator_node)
-    graph.add_node("scanner", scanner_node)
-    graph.add_node("logic_auditor", logic_auditor_node)
-    graph.add_node("vuln_analyzer", vuln_analyzer_node)
-    graph.add_node("exploit_reasoner", exploit_reasoner_node)
-    graph.add_node("fix_suggester", fix_suggester_node)
-    graph.add_node("secure_coder", secure_coder_node)
-    graph.add_node("tester", tester_node)
-    graph.add_node("pr_creator", pr_creator_node)
-    graph.add_node("report_generator", report_generator_node)
+    graph.add_node("orchestrator", _timed_node("orchestrator", orchestrator_node))
+    graph.add_node("scanner", _timed_node("scanner", scanner_node))
+    graph.add_node("logic_auditor", _timed_node("logic_auditor", logic_auditor_node))
+    graph.add_node("vuln_analyzer", _timed_node("vuln_analyzer", vuln_analyzer_stage))
+    graph.add_node("exploit_reasoner", _timed_node("exploit_reasoner", exploit_reasoner_stage))
+    graph.add_node("fix_suggester", _timed_node("fix_suggester", fix_suggester_stage))
+    graph.add_node("secure_coder", _timed_node("secure_coder", secure_coder_node))
+    graph.add_node("reviewer", _timed_node("reviewer", reviewer_node))
+    graph.add_node("tester", _timed_node("tester", tester_node))
+    graph.add_node("pr_creator", _timed_node("pr_creator", pr_creator_node))
+    graph.add_node("report_generator", _timed_node("report_generator", report_generator_node))
 
     graph.set_entry_point("orchestrator")
 
@@ -1643,7 +1828,16 @@ def build_graph() -> StateGraph:
         "secure_coder": "secure_coder",
         "report_generator": "report_generator",
     })
-    graph.add_edge("secure_coder", "tester")
+    graph.add_conditional_edges("secure_coder", _route_after_secure_coder, {
+        "reviewer": "reviewer",
+        "secure_coder": "secure_coder",
+        "report_generator": "report_generator",
+    })
+    graph.add_conditional_edges("reviewer", _route_after_reviewer, {
+        "tester": "tester",
+        "secure_coder": "secure_coder",
+        "report_generator": "report_generator",
+    })
     graph.add_conditional_edges("tester", _route_after_tester, {
         "pr_creator": "pr_creator",
         "secure_coder": "secure_coder",
@@ -1691,6 +1885,10 @@ def _initial_state(repo_url: str, scan_id: Optional[str] = None,
         test_verdict=None,
         pr_url=None,
         remediation_status="skipped",
+        # A full scan's create_pr is the user's explicit "fix and open a PR".
+        open_pr=bool(create_pr),
+        pr=None,
+        parent_scan_id=None,
         agent_logs=[f"[Orchestrator] Initializing scan {sid} for {repo_url}"],
     )
 

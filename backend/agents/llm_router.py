@@ -140,8 +140,10 @@ _LLM_TIMEOUT_SECS: float = float(os.getenv("LLM_TIMEOUT_SECS", "120"))
 
 
 def _concurrency(name: str, default: int) -> int:
+    """Per-provider concurrency: POOL_<NAME>, else LLM_CONCURRENCY_<NAME>."""
+    raw = os.getenv(f"POOL_{name}") or os.getenv(f"LLM_CONCURRENCY_{name}")
     try:
-        return max(1, int(os.getenv(f"LLM_CONCURRENCY_{name}", str(default))))
+        return max(1, int(raw)) if raw else default
     except ValueError:
         return default
 
@@ -149,9 +151,9 @@ def _concurrency(name: str, default: int) -> int:
 # Per-provider semaphores bound concurrent calls (prompt 00a load balancing).
 # Rebuildable in tests by replacing entries.
 _SEMAPHORES: dict[str, threading.Semaphore] = {
-    "groq":       threading.Semaphore(_concurrency("GROQ", 4)),
-    "gemini":     threading.Semaphore(_concurrency("GEMINI", 2)),
-    "openrouter": threading.Semaphore(_concurrency("OPENROUTER", 1)),
+    "groq":       threading.Semaphore(_concurrency("GROQ", 3)),
+    "gemini":     threading.Semaphore(_concurrency("GEMINI", 3)),
+    "openrouter": threading.Semaphore(_concurrency("OPENROUTER", 2)),
     "ollama":     threading.Semaphore(_concurrency("OLLAMA", 2)),
 }
 
@@ -504,6 +506,31 @@ class LLMUnavailableError(RuntimeError):
         self.reason = reason
 
 
+# ── Provider cooldown on rate limits (429) ────────────────────────────────────
+# A rate-limited provider is skipped for a while so concurrent calls spread to
+# the next provider instead of all waiting on the same 429.
+_provider_cooldowns: dict[str, float] = {}
+_PROVIDER_COOLDOWN_SECS = 30.0
+
+
+def _is_rate_limit(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return (_status_code(exc) == 429 or "rate limit" in msg
+            or "rate_limit" in msg or "ratelimit" in msg or "429" in msg)
+
+
+def _cool_provider(provider: str, secs: float | None = None) -> None:
+    secs = _PROVIDER_COOLDOWN_SECS if secs is None else secs
+    with _state_lock:
+        _provider_cooldowns[provider] = time.time() + secs
+    logger.warning("[LLMPool] %s cooling down %ds", provider, int(secs))
+
+
+def _provider_cooling(provider: str) -> bool:
+    with _state_lock:
+        return _provider_cooldowns.get(provider, 0.0) > time.time()
+
+
 def _status_code(exc: Exception) -> int | None:
     code = getattr(exc, "status_code", None)
     if isinstance(code, int):
@@ -821,13 +848,13 @@ def get_llm_status() -> dict:
     for provider in ("groq", "gemini", "openrouter", "ollama"):
         if provider == "groq":
             configured = _groq_configured()
-            concurrency = _concurrency("GROQ", 4)
+            concurrency = _concurrency("GROQ", 3)
         elif provider == "gemini":
             configured = _gemini_configured()
-            concurrency = _concurrency("GEMINI", 2)
+            concurrency = _concurrency("GEMINI", 3)
         elif provider == "openrouter":
             configured = _openrouter_configured()
-            concurrency = _concurrency("OPENROUTER", 1)
+            concurrency = _concurrency("OPENROUTER", 2)
         else:
             configured = True  # local; availability is probed per call
             concurrency = _concurrency("OLLAMA", 2)
@@ -919,6 +946,9 @@ def invoke_llm(messages: list, model: str | None = None,
     tried_any = False
 
     for provider in order:
+        if _provider_cooling(provider) and any(
+                p != provider and not _provider_cooling(p) for p in order):
+            continue  # rate-limited a moment ago and another provider is free
         models = _provider_models(provider)
         if pinned is not None and provider == pinned[0]:
             models = [pinned[1]]
@@ -944,6 +974,13 @@ def invoke_llm(messages: list, model: str | None = None,
                     hard_error = exc
                 continue
             except Exception as exc:
+                if (_is_rate_limit(exc) and not _is_auth_error(exc)
+                        and not (provider == "openrouter"
+                                 and _is_openrouter_upstream_limit(exc))):
+                    # (OpenRouter's upstream limits are per model and keep
+                    # their own cooldown in _classify_provider_error.)
+                    _cool_provider(provider)
+                    continue
                 outcome = _classify_provider_error(provider, item, exc)
                 if outcome in ("next", "retry"):
                     continue
@@ -989,6 +1026,9 @@ def _invoke_groq_with_retry(model: str, messages: list) -> Any:
                 raise  # classified by the caller (disable vs pin-error)
             if _is_auth_error(exc):
                 raise  # caller rotates keys / records the hard fault
+            if _is_rate_limit(exc):
+                _cool_provider("groq")
+                raise _TryNext(f"groq rate limited: {_scrub(str(exc))[:120]}")
             if not _is_groq_error(exc):
                 raise
             last_exc = exc

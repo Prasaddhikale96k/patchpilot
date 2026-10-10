@@ -46,6 +46,14 @@ class ScanState(TypedDict):
     repo_path: str
     tech_stack: Dict[str, Any]
     raw_findings: List[Dict[str, Any]]
+    # PARALLEL_AGENTS: the LLM audit computed during the scan phase
+    # ({"findings": [...], "logs": [...]}); the logic_auditor node merges it.
+    logic_audit: Optional[Dict[str, Any]]
+    # Seconds spent per graph node (accumulated across retries).
+    timings: Dict[str, float]
+    # True when the specialist squad already produced vulnerabilities,
+    # exploits and patches; the exploit/fix stage nodes then pass through.
+    squad_done: bool
 
     # ── Per-agent outputs ──────────────────────────────────
     vulnerabilities: List[Vulnerability]
@@ -78,6 +86,12 @@ class ScanState(TypedDict):
     test_verdict: Optional[str]     # verified | failed | error (tester node)
     pr_url: Optional[str]
     remediation_status: str         # skipped|running|pr_opened|verified_no_pr|failed
+    # Explicit consent for the remote write when it differs from create_pr
+    # (POST /api/remediate verifies by default and opens a PR only if asked).
+    open_pr: bool
+    # Structured PR outcome: {requested,status,reason,url,number,branch,base,…}
+    pr: Optional[Dict[str, Any]]
+    parent_scan_id: Optional[str]   # remediation runs: the scan they fix
 
     # Accumulates across nodes; streamed live to frontend via WebSocket
     agent_logs: Annotated[List[str], operator.add]
