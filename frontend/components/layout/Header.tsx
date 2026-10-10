@@ -2,6 +2,8 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
+import { GITHUB_URL } from "@/lib/brand"
+import { ThemeToggle } from "@/components/ui/ThemeToggle"
 
 export default function Header() {
   const pathname = usePathname()
@@ -29,8 +31,8 @@ export default function Header() {
             </svg>
           </span>
           <span>
-            <span className="block text-lg font-black leading-tight tracking-tight text-ink">SentinelAI</span>
-            <span className="block text-xs font-medium leading-tight text-ink-muted">Autonomous Threat Detection</span>
+            <span className="block text-lg font-black leading-tight tracking-tight text-ink">PatchPilot</span>
+            <span className="block text-xs font-medium leading-tight text-ink-muted">Verified security fixes</span>
           </span>
         </Link>
 
@@ -53,11 +55,12 @@ export default function Header() {
               </Link>
             )
           })}
+          <ThemeToggle className="ml-1 !h-10 !w-10 !rounded-full !border-2 !border-ink/15" />
           <a
-            href="https://github.com/Pushpenderrathore/sentinelai"
+            href={GITHUB_URL}
             target="_blank"
             rel="noopener noreferrer"
-            aria-label="SentinelAI on GitHub"
+            aria-label="PatchPilot on GitHub"
             className="ml-1 rounded-full border-2 border-ink/15 p-2 text-ink-muted transition-colors hover:border-ink/40 hover:text-ink"
           >
             <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden>

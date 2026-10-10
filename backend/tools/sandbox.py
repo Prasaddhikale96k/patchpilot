@@ -36,34 +36,62 @@ def _timeout_secs() -> int:
 
 # ── Engine resolution ─────────────────────────────────────────────────────
 
+class SandboxUnavailable(RuntimeError):
+    """No isolated engine is available; untrusted tests must not run."""
+
+
+_DOCKER_PROBED_AT = 0.0
+_DOCKER_REPROBE_SECS = 30.0
+
+
 def docker_available() -> bool:
-    """True when the Docker daemon answers (result cached per process)."""
-    global _DOCKER_OK
-    if _DOCKER_OK is None:
-        try:
-            # nosec B603 - daemon probe, fixed argument list, no shell.
-            subprocess.run(["docker", "info"],  # nosec B603
-                           capture_output=True, text=True, encoding="utf-8",
-                           errors="replace", timeout=15)
-            _DOCKER_OK = True
-        except Exception:
-            _DOCKER_OK = False
+    """True when the Docker daemon actually answers.
+
+    `docker info` exits non-zero when the CLI exists but the daemon is
+    down; the old probe only caught a missing binary, so a stopped Docker
+    Desktop read as available. A positive result is cached; a negative
+    one is re-probed after 30s so starting Docker needs no backend restart.
+    """
+    global _DOCKER_OK, _DOCKER_PROBED_AT
+    if _DOCKER_OK or (_DOCKER_OK is False
+                      and time.monotonic() - _DOCKER_PROBED_AT < _DOCKER_REPROBE_SECS):
+        return bool(_DOCKER_OK)
+    try:
+        # nosec B603 - daemon probe, fixed argument list, no shell.
+        proc = subprocess.run(["docker", "info", "--format",  # nosec B603
+                               "{{.ServerVersion}}"],
+                              capture_output=True, text=True, encoding="utf-8",
+                              errors="replace", timeout=15)
+        _DOCKER_OK = proc.returncode == 0 and bool(proc.stdout.strip())
+    except Exception:
+        _DOCKER_OK = False
+    _DOCKER_PROBED_AT = time.monotonic()
+    if not _DOCKER_OK:
+        logger.warning("sandbox: Docker daemon is not reachable")
     return _DOCKER_OK
 
 
 def resolve_sandbox() -> str:
-    """'docker' or 'venv' per SANDBOX=auto|docker|venv (auto prefers docker)."""
+    """'docker', or 'venv' ONLY when explicitly requested with SANDBOX=venv.
+
+    SANDBOX=auto|docker never falls back to the host: generated exploit
+    tests are untrusted code, and silently running them outside a
+    container (as the old auto/docker fallback did) is exactly what the
+    sandbox exists to prevent. SANDBOX=venv is a deliberate developer
+    opt-in and is logged loudly.
+    """
     mode = os.getenv("SANDBOX", "auto").strip().lower()
-    if mode == "docker":
-        engine = "docker" if docker_available() else "venv"
-        if engine == "venv":
-            logger.warning("sandbox: SANDBOX=docker but Docker is down — venv")
-    elif mode == "venv":
-        engine = "venv"
-    else:
-        engine = "docker" if docker_available() else "venv"
-    logger.info("sandbox: engine=%s (SANDBOX=%s)", engine, mode)
-    return engine
+    if mode == "venv":
+        logger.warning("sandbox: SANDBOX=venv — tests run UNISOLATED on the "
+                       "host. Use only with trusted fixtures.")
+        return "venv"
+    if docker_available():
+        logger.info("sandbox: engine=docker (SANDBOX=%s)", mode)
+        return "docker"
+    raise SandboxUnavailable(
+        "Docker is not available, so generated tests cannot be run in "
+        "isolation. Start Docker (or Docker Desktop) and retry. Tests are "
+        "never run on the host unless SANDBOX=venv is set explicitly.")
 
 
 def detect_project(code_dir: str) -> str | None:
@@ -104,6 +132,13 @@ def _dep_digest(code_dir: str) -> tuple[str, dict[str, bytes]]:
 
 
 def _dockerfile_text(blobs: dict[str, bytes]) -> str:
+    if not blobs:
+        # Stdlib-only project: no manifests to stage, so there is nothing
+        # to COPY and nothing to pip-install besides the test runner.
+        # (The old text unconditionally COPYed requirements.txt and ran
+        # `pip install -e .`, which fails without manifests in context.)
+        return ("FROM python:3.12-slim\nWORKDIR /app\n"
+                "RUN pip install --no-cache-dir pytest\n")
     copies = " ".join(sorted(blobs)) or "requirements.txt"
     if "requirements.txt" in blobs:
         install = ("RUN pip install --no-cache-dir -r requirements.txt; "
@@ -137,13 +172,22 @@ def prepare_image(code_dir: str) -> str:
         print(f"reusing image {tag}")
         logger.info("sandbox: reusing image %s", tag)
         return tag
-    if detect_project(code_dir) is None:
-        raise RuntimeError(f"No dependency files in {code_dir}")
+    if not blobs:
+        # Stdlib-only project (e.g. DSVPWA: app + tests import nothing
+        # beyond the standard library, so the clone legitimately has no
+        # requirements.txt / pyproject.toml / setup.py). The old code
+        # raised "No dependency files" here, which made every such repo
+        # permanently unverifiable — reviewer-approved patches could never
+        # reach Docker verification or a PR. A pytest-only image is the
+        # correct environment; missing third-party imports, if any, still
+        # surface honestly as test failures/errors, never as passes.
+        logger.info("sandbox: no supported manifests in %s — building "
+                    "stdlib-only (pytest) image %s", code_dir, tag)
     build_dir = tempfile.mkdtemp(prefix="pp-build-")
     try:
         for name, content in blobs.items():
             (Path(build_dir) / name).write_bytes(content)
-        if "requirements.txt" not in blobs:
+        if blobs and "requirements.txt" not in blobs:
             (Path(build_dir) / "requirements.txt").write_text("")
         (Path(build_dir) / "Dockerfile").write_text(
             _dockerfile_text(blobs))
@@ -165,6 +209,8 @@ def prepare_image(code_dir: str) -> str:
 
 # ── JUnit parsing ─────────────────────────────────────────────────────────
 
+_MAX_JUNIT_BYTES = 5 * 1024 * 1024
+
 _SUMMARY_RES = {
     "passed": re.compile(r"(\d+) passed"),
     "failed": re.compile(r"(\d+) failed"),
@@ -181,8 +227,16 @@ def parse_junit(xml_path: str, phase: str, output_text: str,
     total = passed = failed = errors = skipped = 0
     parsed = False
     try:
-        tree = ET.parse(xml_path)
-        root = tree.getroot()
+        # junit.xml is written by code running inside the sandbox, i.e. by
+        # an untrusted test. Cap its size and refuse any DTD/ENTITY before
+        # the host parses it (entity-expansion "billion laughs" defence).
+        if os.path.getsize(xml_path) > _MAX_JUNIT_BYTES:
+            raise ValueError("junit.xml too large")
+        with open(xml_path, "rb") as fh:
+            raw = fh.read()
+        if b"<!DOCTYPE" in raw.upper() or b"<!ENTITY" in raw.upper():
+            raise ValueError("junit.xml contains a DTD; refusing to parse")
+        root = ET.fromstring(raw)  # nosec B314 - size-capped, DTD-free, see above
         suites = root.findall("testsuite") or [root]
         for suite in suites:
             total += int(suite.get("tests", 0))
@@ -238,18 +292,56 @@ def run_cmd(cmd: list[str], cwd: str, timeout: int):
 
 # ── Docker run ────────────────────────────────────────────────────────────
 
+# docker's own exit codes: the container never ran the tests.
+_DOCKER_INFRA_RCS = {125: "docker could not create/start the container",
+                     126: "the test command could not be invoked",
+                     127: "the test command was not found in the image"}
+
+
+def docker_run_args(code_dir: str, out_dir: str, tag: str, name: str) -> list[str]:
+    """Locked-down `docker run` prefix shared by every test phase.
+
+    No network, bounded memory/CPU/pids, all capabilities dropped,
+    no privilege escalation, non-root user, read-only root filesystem.
+    Writable: /tmp (tmpfs), /out (results) and /app — which is always a
+    DISPOSABLE copy made for this phase, never the scanned clone or any
+    user checkout. (A read-only /app broke ordinary apps that create
+    their instance/ dir on startup: VulnBank's 22 tests all errored.)
+    No Docker socket or host credential is mounted.
+    """
+    return ["docker", "run", "--rm", "--name", name,
+            "--network", "none", "--memory", "1g", "--memory-swap", "1g",
+            "--cpus", "1", "--pids-limit", "256",
+            "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+            "--user", _container_user(), "--read-only",
+            # container-side tmpfs, not a host path
+            "--tmpfs", "/tmp:rw,exec,size=256m",  # nosec B108
+            "-e", "PYTHONDONTWRITEBYTECODE=1", "-e", "HOME=/tmp",
+            "-v", f"{host_path_for_docker(code_dir)}:/app",
+            "-v", f"{host_path_for_docker(out_dir)}:/out",
+            "-w", "/app", tag]
+
+
+def _container_user() -> str:
+    """Non-root uid that can write the disposable bind mount.
+
+    Linux: the host user's own uid (the copy is owned by it). Docker
+    Desktop (Windows/macOS) maps bind-mount ownership, so the unprivileged
+    `nobody` uid works there. Never root.
+    """
+    getuid = getattr(os, "getuid", None)
+    if getuid is not None and getuid() != 0:
+        return f"{getuid()}:{os.getgid()}"
+    return "65534:65534"
+
 def _run_tests_docker(code_dir: str, phase: str, tag: str,
                       selector: str | None, scan_id: str,
                       timeout: int) -> dict:
     out_dir = tempfile.mkdtemp(prefix=f"pp-out-{scan_id}-{phase}-")
-    name = f"pp-{scan_id}-{phase}"
-    cmd = ["docker", "run", "--rm", "--name", name,
-           "--network", "none", "--memory", "1g", "--cpus", "1",
-           "--pids-limit", "256",
-           "-e", "PYTHONDONTWRITEBYTECODE=1",
-           "-v", f"{host_path_for_docker(code_dir)}:/app",
-           "-v", f"{host_path_for_docker(out_dir)}:/out",
-           "-w", "/app", tag,
+    # The container runs as an unprivileged uid; let it write junit.xml.
+    os.chmod(out_dir, 0o777)  # nosec B103 - private temp dir, results only
+    name = f"pp-{scan_id}-{phase}-{os.getpid()}-{int(time.time())}"
+    cmd = docker_run_args(code_dir, out_dir, tag, name) + [
            "python", "-m", "pytest", "-q", "-p", "no:cacheprovider",
            "--junitxml=/out/junit.xml"]
     if selector:
@@ -269,6 +361,9 @@ def _run_tests_docker(code_dir: str, phase: str, tag: str,
         returncode = 124
         output = ((exc.stdout or b"").decode(errors="replace")
                   if isinstance(exc.stdout, bytes) else (exc.stdout or ""))
+        logger.warning("sandbox: docker run timed out: scan=%s phase=%s "
+                       "container=%s after %ss; killed", scan_id, phase,
+                       name, timeout)
         try:
             subprocess.run(["docker", "kill", name],  # nosec B603
                            capture_output=True, timeout=15)
@@ -280,6 +375,18 @@ def _run_tests_docker(code_dir: str, phase: str, tag: str,
                          duration, "docker")
     report["timed_out"] = timed_out
     report["returncode"] = returncode
+    # pytest exit codes: 0 ok, 1 failures, 2 interrupted, 3 internal error,
+    # 4 usage error, 5 no tests collected. Docker's 125-127 mean the tests
+    # never ran. Either way "0 failures" must not read as a pass.
+    if returncode in _DOCKER_INFRA_RCS:
+        report["infra_error"] = (f"{_DOCKER_INFRA_RCS[returncode]} "
+                                 f"(exit {returncode}): {output.strip()[-300:]}")
+    elif returncode in (2, 3, 4):
+        report["infra_error"] = f"pytest could not run (exit {returncode})"
+    logger.info("sandbox: docker run done: scan=%s phase=%s rc=%s "
+                "passed=%s failed=%s errors=%s (%.1fs)", scan_id, phase,
+                returncode, report["passed"], report["failed"],
+                report["errors"], duration)
     shutil.rmtree(out_dir, ignore_errors=True)
     return report
 

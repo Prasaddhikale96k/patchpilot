@@ -13,7 +13,7 @@ cannot read the response; and routing it through here keeps scan targets out of
 the client and lets one lookup be cached for every viewer of a report.
 
 Only passive routes are used. OSIRIS also publishes /api/osint/sweep and
-/api/scanner, which generate traffic against the named target — SentinelAI does
+/api/scanner, which generate traffic against the named target — PatchPilot does
 its own active scanning under its own authorisation checks, so those stay
 unused here.
 
@@ -139,7 +139,7 @@ def _get(path: str, params: dict) -> tuple[dict | None, str | None]:
             url,
             params=params,
             timeout=timeout,
-            headers={"User-Agent": "SentinelAI/1.0 (+https://github.com/enp7s0d/sentinelai)"},
+            headers={"User-Agent": "PatchPilot/1.0 (+https://github.com/Prasaddhikale96k/patchpilot)"},
         )
     except RequestException as exc:
         logger.info("osiris: %s unreachable: %s", path, exc)

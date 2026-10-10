@@ -7,7 +7,7 @@ export function DashboardHero({ scanCount }: { scanCount: number | null }) {
     <section aria-labelledby="dashboard-hero" className="pb-8 pt-10 sm:pb-10 sm:pt-14">
       <p className="inline-flex items-center gap-2 rounded-full border-2 border-ink/15 bg-paper px-3 py-1 text-xs font-bold tracking-wide text-ink-soft">
         <ShieldIcon width={16} height={16} />
-        SentinelAI · VulnSentinel
+        PatchPilot
         {scanCount !== null && scanCount > 0 && (
           <span className="font-mono font-semibold text-ink-muted">
             · {scanCount} run{scanCount === 1 ? "" : "s"}

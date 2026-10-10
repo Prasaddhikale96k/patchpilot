@@ -1,14 +1,14 @@
-# Render Blueprint — deploys the SentinelAI FastAPI backend.
+# Render Blueprint — deploys the PatchPilot FastAPI backend.
 # Push this repo to GitHub, then in Render: New + → Blueprint → pick this repo.
 # Set the secret env vars (GROQ_API_KEY, ALLOWED_ORIGINS) in the dashboard.
 services:
   - type: web
     # This is the service name, not the hostname. Render derives the public URL
     # from it, but appends a random suffix when the hostname is already taken -
-    # so this service can be served from sentinelai-backend-xxxx.onrender.com.
+    # so this service can be served from patchpilot-backend-xxxx.onrender.com.
     # Always read the real URL from the dashboard, and note that scan history
     # lives on the container filesystem, which the free plan wipes on restart.
-    name: sentinelai-backend
+    name: patchpilot-backend
     runtime: python
     plan: free
     rootDir: backend
@@ -25,7 +25,7 @@ services:
       - key: GROQ_API_KEY
         sync: false
       # Your Vercel frontend URL(s), comma-separated, e.g.
-      #   https://sentinelai.vercel.app
+      #   https://patchpilot.vercel.app
       - key: ALLOWED_ORIGINS
         sync: false
       # Also allow Vercel preview deployments (project-*.vercel.app)

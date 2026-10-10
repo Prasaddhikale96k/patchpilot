@@ -77,7 +77,7 @@ schedule can be watched instead of described. Say that out loud when you show it
 device, not a different code path.
 
 ```bash
-cd ~/Desktop/sentinelai/backend
+cd ~/Desktop/patchpilot/backend
 ALLOW_PRIVATE_TARGETS=true \
 RETENTION_ARCHIVE_AFTER_DAYS=0.01 \
 RETENTION_TRASH_AFTER_DAYS=0.02 \
@@ -92,7 +92,7 @@ That is 14 minutes to archive, 29 to trash, and 7 more after trashing to become 
 Default ports line up, so no env vars are needed here.
 
 ```bash
-cd ~/Desktop/sentinelai/frontend && npm run dev
+cd ~/Desktop/patchpilot/frontend && npm run dev
 ```
 
 ### 5. Run the scan loop about 40 minutes early

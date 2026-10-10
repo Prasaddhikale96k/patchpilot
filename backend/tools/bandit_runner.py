@@ -33,18 +33,16 @@ def _bandit_bin() -> str:
 def _relative(path: str, repo_path: str) -> str:
     """Report paths relative to the repo root. Repos are cloned into a temp
     directory, so the absolute path leaks a meaningless location into reports."""
-    if not path:
-        return path
-    try:
-        return os.path.relpath(path, repo_path)
-    except ValueError:
-        return path
+    from tools.repo_paths import normalize_repo_path
+    return normalize_repo_path(path, repo_path)
 
 
-def run_bandit(repo_path: str) -> list[dict]:
+def run_bandit(repo_path: str, files: list[str] | None = None) -> list[dict]:
+    """Scan the repo (or only `files`, repo-relative) with Bandit."""
+    targets = [os.path.join(repo_path, f) for f in files] if files else [repo_path]
     # nosec B603 - resolved executable, fixed argument list, no shell.
     result = subprocess.run(  # nosec B603
-        [_bandit_bin(), "-r", repo_path, "-f", "json", "-q"],
+        [_bandit_bin(), "-r", *targets, "-f", "json", "-q"],
         capture_output=True,
         text=True,
         timeout=120,

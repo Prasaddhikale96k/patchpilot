@@ -5,6 +5,7 @@ import { ArrowRight, Play } from "lucide-react"
 import { motion, useReducedMotion } from "framer-motion"
 import { APP_NAME, TAGLINE } from "@/lib/brand"
 import { ParallelAgentsVisual } from "./ParallelAgentsVisual"
+import { ThemeToggle } from "@/components/ui/ThemeToggle"
 
 const focus = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
 
@@ -20,6 +21,7 @@ export function Hero() {
         <nav aria-label="Primary" className="flex items-center gap-1">
           <Link href="/dashboard" className={`rounded-lg px-3 py-2 text-base text-text-muted hover:text-text-primary ${focus}`}>Open console</Link>
           <Link href="/history" className={`rounded-lg px-3 py-2 text-base text-text-muted hover:text-text-primary ${focus}`}>Reports</Link>
+          <ThemeToggle className="ml-1" />
         </nav>
       </div>
       <div className="grid items-center gap-12 lg:grid-cols-2">

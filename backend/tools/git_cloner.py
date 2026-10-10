@@ -29,6 +29,40 @@ def _git_bin() -> str:
     return resolved
 
 
+def force_rmtree(path: str) -> bool:
+    """Delete a tree, clearing read-only bits on the way. Returns success.
+
+    shutil.rmtree(ignore_errors=True) silently leaves git's read-only pack
+    files behind on Windows: every "cleaned up" clone kept its .git, and a
+    remediation re-run then trusted that husk as a usable clone.
+    """
+    import stat
+
+    def _retry(func, target, _exc):
+        try:
+            os.chmod(target, stat.S_IWRITE | stat.S_IREAD)
+            func(target)
+        except OSError:
+            pass
+
+    if not os.path.exists(path):
+        return True
+    shutil.rmtree(path, onexc=_retry)
+    if os.path.exists(path):
+        logger.warning("Could not fully remove %s", path)
+        return False
+    return True
+
+
+def is_usable_clone(path: str) -> bool:
+    """A checkout with a .git and at least one tracked-tree entry."""
+    try:
+        entries = os.listdir(path)
+    except OSError:
+        return False
+    return ".git" in entries and any(e != ".git" for e in entries)
+
+
 def _repo_dest(scan_id: str) -> str:
     return os.path.join(tempfile.gettempdir(), f"vulnsentinel_{scan_id}")
 
@@ -38,6 +72,7 @@ def clone_repo(repo_url: str, scan_id: str) -> str:
         raise ValueError("Only https:// repository URLs are supported")
 
     dest = _repo_dest(scan_id)
+    force_rmtree(dest)  # a leftover husk would make `git clone` refuse
     env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}  # never hang on a credential prompt
     # nosec B603 - fixed argument list, no shell. repo_url is constrained to
     # https:// above, so it cannot be read as a git option.
@@ -65,14 +100,14 @@ def cleanup_repo(scan_id: str) -> None:
     dest = _repo_dest(scan_id)
     try:
         if os.path.isdir(dest):
-            shutil.rmtree(dest, ignore_errors=True)
-            logger.info("Cleaned up cloned repo %s", dest)
+            if force_rmtree(dest):
+                logger.info("Cleaned up cloned repo %s", dest)
         parent = os.path.dirname(dest)
         prefix = os.path.basename(dest) + "_work_"
         for entry in os.listdir(parent):
             if entry.startswith(prefix):
-                shutil.rmtree(os.path.join(parent, entry), ignore_errors=True)
-                logger.info("Cleaned up work copy %s", entry)
+                if force_rmtree(os.path.join(parent, entry)):
+                    logger.info("Cleaned up work copy %s", entry)
     except Exception:
         logger.warning("Failed to clean up %s", dest, exc_info=True)
 

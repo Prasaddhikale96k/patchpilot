@@ -1,4 +1,4 @@
-# Deploying SentinelAI (free tier, public on the internet)
+# Deploying PatchPilot (free tier, public on the internet)
 
 Two free services, both deploy straight from this GitHub repo:
 
@@ -29,7 +29,7 @@ Both platforms deploy from the repo, so everything below just connects to it.
 
 1. Sign in at [render.com](https://render.com) with GitHub.
 2. **New + → Blueprint**, pick this repo. Render reads `render.yaml` and
-   proposes the `sentinelai-backend` web service. Click **Apply**.
+   proposes the `patchpilot-backend` web service. Click **Apply**.
 3. When prompted, set the env vars it can't infer:
    - **`GROQ_API_KEY`** → your key from [console.groq.com](https://console.groq.com)
    - **`ALLOWED_ORIGINS`** → leave blank for now (you'll set it in step 3).
@@ -46,9 +46,9 @@ Both platforms deploy from the repo, so everything below just connects to it.
    > model, rather than reporting an internal error.
 4. First build takes a few minutes (installs semgrep/bandit). When it's live,
    **copy the URL shown in the Render dashboard.** It is usually
-   `https://sentinelai-backend.onrender.com`, but if that hostname is already
+   `https://patchpilot-backend.onrender.com`, but if that hostname is already
    taken Render appends a random suffix
-   (`https://sentinelai-backend-a1b2.onrender.com`). Use whichever one the
+   (`https://patchpilot-backend-a1b2.onrender.com`). Use whichever one the
    dashboard shows - the service name in `render.yaml` does not guarantee the
    hostname.
 5. Check it: open `<your-render-url>/health` → `{"status":"ok","version":"1.0.0",...}`.
@@ -69,14 +69,14 @@ Both platforms deploy from the repo, so everything below just connects to it.
    copied in step 1.4 - not at the service name:
    - `NEXT_PUBLIC_API_URL` = `https://<your-render-host>.onrender.com`
    - `NEXT_PUBLIC_WS_URL`  = `wss://<your-render-host>.onrender.com`
-4. **Deploy.** You'll get a URL like `https://sentinelai.vercel.app`.
+4. **Deploy.** You'll get a URL like `https://patchpilot.vercel.app`.
 
 ---
 
 ## 3 - Connect CORS back to the frontend
 
-1. In Render → `sentinelai-backend` → **Environment**, set:
-   - `ALLOWED_ORIGINS` = `https://sentinelai.vercel.app` (your real Vercel URL)
+1. In Render → `patchpilot-backend` → **Environment**, set:
+   - `ALLOWED_ORIGINS` = `https://patchpilot.vercel.app` (your real Vercel URL)
 2. Save - Render redeploys automatically.
 
 `render.yaml` already allows `*.vercel.app` preview URLs via

@@ -17,5 +17,5 @@ WORKERS="${WORKERS:-1}"
 if [ "${ENV:-dev}" = "production" ]; then
   exec uvicorn main:app --host "$HOST" --port "$PORT" --workers "$WORKERS" --no-access-log
 else
-  exec uvicorn main:app --host "$HOST" --port "$PORT" --reload
+  exec uvicorn main:app --host "$HOST" --port "$PORT" --reload --reload-exclude "runs"
 fi

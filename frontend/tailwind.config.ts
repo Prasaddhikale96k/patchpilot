@@ -1,5 +1,7 @@
 import type { Config } from "tailwindcss"
 
+const v = (name: string) => `rgb(var(--c-${name}) / <alpha-value>)`
+
 const config: Config = {
   content: [
     "./app/**/*.{ts,tsx}",
@@ -9,44 +11,43 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        // Light editorial theme. Accents are darkened so they stay ≥4.5:1
-        // as text on cream; the pastel card fills live under `bento`.
+        // Theme tokens: values live in app/globals.css as RGB triplets and
+        // switch with <html data-theme="light|dark">.
         sentinel: {
-          bg:      "#F5F0E2",
-          surface: "#FFFCF3",
-          border:  "#E2D9C3",
-          green:   "#0B7A4B",
-          cyan:    "#1F5FA3",
-          red:     "#C2185B",
-          yellow:  "#8A6100",
-          purple:  "#5B3FC4",
-          muted:   "#5E5747",
+          bg:      v("bg"),
+          surface: v("surface"),
+          border:  v("border"),
+          green:   v("sg-green"),
+          cyan:    v("sg-cyan"),
+          red:     v("sg-red"),
+          yellow:  v("sg-yellow"),
+          purple:  v("sg-purple"),
+          muted:   v("muted"),
         },
         ink: {
-          DEFAULT: "#111111",
-          soft:    "#2B2925",
-          muted:   "#5E5747",
+          DEFAULT: v("text"),
+          soft:    v("soft"),
+          muted:   v("muted"),
         },
-        cream: "#F5F0E2",
-        paper: "#FFFCF3",
-        line:  "#E2D9C3",
+        cream: v("bg"),
+        paper: v("surface"),
+        line:  v("border"),
         bento: {
-          lavender: "#B5A0EA",
-          pink:     "#FA4386",
-          blue:     "#A4C5E5",
-          peach:    "#FFA778",
-          mustard:  "#E8BC47",
+          lavender: v("bento-lavender"),
+          pink:     v("bento-pink"),
+          blue:     v("bento-blue"),
+          peach:    v("bento-peach"),
+          mustard:  v("bento-mustard"),
         },
-        // PatchPilot dark console tokens (landing + proof UI).
-        bg:      "#0A0E12",
-        surface: "#11161B",
-        border:  "#1F2833",
-        "text-primary": "#F5F7FA",
-        "text-muted":   "#8B96A5",
-        accent:  "#10B981",
-        danger:  "#EF4444",
-        warning: "#F59E0B",
-        info:    "#3B82F6",
+        bg:      v("bg"),
+        surface: v("surface"),
+        border:  v("border"),
+        "text-primary": v("text"),
+        "text-muted":   v("muted"),
+        accent:  v("accent"),
+        danger:  v("danger"),
+        warning: v("warning"),
+        info:    v("info"),
         // Original dark palette, kept only for the (hidden) ExamGuard module.
         legacy: {
           bg:      "#0a0a0f",

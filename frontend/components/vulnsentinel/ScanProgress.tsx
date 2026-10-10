@@ -83,12 +83,12 @@ function SpinnerRing() {
     >
       <circle
         cx="12" cy="12" r="9"
-        stroke="#1F2833"
+        stroke="rgb(var(--c-border))"
         strokeWidth="3"
       />
       <path
         d="M12 3a9 9 0 0 1 9 9"
-        stroke="#60A5FA"
+        stroke="rgb(var(--c-sg-cyan))"
         strokeWidth="3"
         strokeLinecap="round"
       />
@@ -99,10 +99,10 @@ function SpinnerRing() {
 function CheckCircle() {
   return (
     <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" aria-hidden>
-      <circle cx="12" cy="12" r="10" fill="#60A5FA" />
+      <circle cx="12" cy="12" r="10" fill="rgb(var(--c-sg-cyan))" />
       <path
         d="M7 12.5l3.5 3.5 6.5-7"
-        stroke="#11161B"
+        stroke="rgb(var(--c-surface))"
         strokeWidth="2.5"
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -117,7 +117,7 @@ function ErrorCircle({ hue = "194,24,91" }: { hue?: string }) {
       <circle cx="12" cy="12" r="10" fill={`rgb(${hue})`} />
       <path
         d="M8 8l8 8M16 8l-8 8"
-        stroke="#11161B"
+        stroke="rgb(var(--c-surface))"
         strokeWidth="2.5"
         strokeLinecap="round"
       />
@@ -128,7 +128,7 @@ function ErrorCircle({ hue = "194,24,91" }: { hue?: string }) {
 function PendingCircle() {
   return (
     <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" aria-hidden>
-      <circle cx="12" cy="12" r="9" stroke="#2B3744" strokeWidth="2" />
+      <circle cx="12" cy="12" r="9" stroke="rgb(var(--c-border))" strokeWidth="2" />
     </svg>
   )
 }
@@ -159,8 +159,8 @@ function AgentRow({ agent, isLast, errHue = "194,24,91" }: {
           className="absolute left-3 top-7 w-px h-full -translate-x-px"
           style={{
             background: isDone
-              ? "linear-gradient(to bottom, #60A5FA55, #60A5FA22)"
-              : "#1F2833",
+              ? "linear-gradient(to bottom, rgb(var(--c-sg-cyan) / 0.33), rgb(var(--c-sg-cyan) / 0.13))"
+              : "rgb(var(--c-border))",
             transition: "background 0.6s ease",
           }}
         />
@@ -196,17 +196,17 @@ function AgentRow({ agent, isLast, errHue = "194,24,91" }: {
             <span
               className="font-mono text-sm font-semibold transition-colors duration-300"
               style={{
-                color: isRunning ? "#F5F7FA"
-                     : isDone    ? "#C9D1DB"
+                color: isRunning ? "rgb(var(--c-text))"
+                     : isDone    ? "rgb(var(--c-soft))"
                      : isError   ? `rgb(${errHue})`
-                     : "#8B96A5",
+                     : "rgb(var(--c-muted))",
               }}
             >
               {agent.label}
             </span>
             <span
               className="text-xs transition-colors duration-300"
-              style={{ color: isError ? `rgba(${errHue},0.53)` : "#8B96A5" }}
+              style={{ color: isError ? `rgba(${errHue},0.53)` : "rgb(var(--c-muted))" }}
             >
               {agent.description}
             </span>
@@ -241,7 +241,7 @@ export default function ScanProgress({ activeNode, status, seenNodes, done, erro
   const wasInterrupted = errorKind === "interrupted"
   const seen = seenNodes ? new Set(seenNodes) : null
   const errHue   = opFault ? "138,97,0" : "194,24,91"
-  const errSolid = opFault ? "#FBBF24" : "#F87171"
+  const errSolid = opFault ? "rgb(var(--c-sg-yellow))" : "rgb(var(--c-sg-red))"
   const resultsRef = useRef<HTMLDivElement | null>(null)
 
   // Highest backend node seen so far (it finishes before being emitted), so
@@ -306,12 +306,12 @@ export default function ScanProgress({ activeNode, status, seenNodes, done, erro
   : "CLOSED"
 
   const connColor =
-    done   ? "#10B981"
-  : error  ? (opFault ? "#FBBF24" : "#F87171")
-  : status === "open"       ? "#10B981"
-  : status === "polling"    ? "#60A5FA"
-  : status === "connecting" ? "#FBBF24"
-  : "#8B96A5"
+    done   ? "rgb(var(--c-sg-green))"
+  : error  ? (opFault ? "rgb(var(--c-sg-yellow))" : "rgb(var(--c-sg-red))")
+  : status === "open"       ? "rgb(var(--c-sg-green))"
+  : status === "polling"    ? "rgb(var(--c-sg-cyan))"
+  : status === "connecting" ? "rgb(var(--c-sg-yellow))"
+  : "rgb(var(--c-muted))"
 
   // ── Auto-scroll on completion ───────────────────────────────
   useEffect(() => {
@@ -329,42 +329,42 @@ export default function ScanProgress({ activeNode, status, seenNodes, done, erro
     <div
       className="w-full rounded-2xl overflow-hidden"
       style={{
-        background:  "#11161B",
-        border:      "1px solid #1F2833",
+        background:  "rgb(var(--c-surface))",
+        border:      "1px solid rgb(var(--c-border))",
         fontFamily:  "'JetBrains Mono', Menlo, Monaco, Consolas, monospace",
       }}
     >
       {/* ── Header ── */}
       <div
         className="flex items-center justify-between px-5 py-3.5"
-        style={{ borderBottom: "1px solid #1F2833", background: "#11161B" }}
+        style={{ borderBottom: "1px solid rgb(var(--c-border))", background: "rgb(var(--c-surface))" }}
       >
         <div className="flex items-center gap-2.5">
           {/* macOS traffic lights */}
-          <span className="w-3 h-3 rounded-full" style={{ background: "#F87171" }} />
-          <span className="w-3 h-3 rounded-full" style={{ background: "#FBBF24" }} />
-          <span className="w-3 h-3 rounded-full" style={{ background: "#10B981" }} />
-          <span className="ml-3 text-xs" style={{ color: "#8B96A5" }}>
+          <span className="w-3 h-3 rounded-full" style={{ background: "rgb(var(--c-sg-red))" }} />
+          <span className="w-3 h-3 rounded-full" style={{ background: "rgb(var(--c-sg-yellow))" }} />
+          <span className="w-3 h-3 rounded-full" style={{ background: "rgb(var(--c-sg-green))" }} />
+          <span className="ml-3 text-xs" style={{ color: "rgb(var(--c-muted))" }}>
             scan-progress
           </span>
         </div>
 
         <div className="flex items-center gap-3">
           {/* Live / connecting indicator */}
-          <span className="flex items-center gap-1.5 text-xs" style={{ color: "#8B96A5" }}>
+          <span className="flex items-center gap-1.5 text-xs" style={{ color: "rgb(var(--c-muted))" }}>
             <span
               className="w-1.5 h-1.5 rounded-full"
               style={{
                 background: connColor,
                 animation: connLabel === "LIVE" ? "pulse 2s infinite" : undefined,
-                boxShadow: connLabel === "LIVE" ? "0 0 6px #10B98188" : undefined,
+                boxShadow: connLabel === "LIVE" ? "0 0 6px rgb(var(--c-sg-green) / 0.53)" : undefined,
               }}
             />
             {connLabel}
           </span>
 
           {/* Step counter */}
-          <span className="text-xs font-mono" style={{ color: "#8B96A5" }}>
+          <span className="text-xs font-mono" style={{ color: "rgb(var(--c-muted))" }}>
             {doneCount}/{AGENT_PIPELINE.length} agents
           </span>
         </div>
@@ -373,13 +373,13 @@ export default function ScanProgress({ activeNode, status, seenNodes, done, erro
       {/* ── Overall progress bar ── */}
       <div className="px-5 pt-4 pb-2">
         <div className="flex items-center justify-between mb-1.5">
-          <span className="text-xs" style={{ color: "#8B96A5" }}>
+          <span className="text-xs" style={{ color: "rgb(var(--c-muted))" }}>
             {headerLabel}
           </span>
           <span
             className="text-xs font-mono tabular-nums"
             style={{
-              color: done ? "#10B981" : error ? errSolid : "#60A5FA",
+              color: done ? "rgb(var(--c-sg-green))" : error ? errSolid : "rgb(var(--c-sg-cyan))",
               transition: "color 0.5s",
             }}
           >
@@ -390,17 +390,17 @@ export default function ScanProgress({ activeNode, status, seenNodes, done, erro
         {/* Track */}
         <div
           className="w-full rounded-full overflow-hidden"
-          style={{ height: "4px", background: "#1F2833" }}
+          style={{ height: "4px", background: "rgb(var(--c-border))" }}
         >
           <div
             style={{
               height:     "100%",
               width:      `${overallProgress}%`,
               background: done
-                ? "linear-gradient(90deg, #60A5FA, #10B981)"
+                ? "linear-gradient(90deg, rgb(var(--c-sg-cyan)), rgb(var(--c-sg-green)))"
                 : error
                 ? `linear-gradient(90deg, rgb(${errHue}), rgba(${errHue},0.65))`
-                : "linear-gradient(90deg, #60A5FA, #3B82F6)",
+                : "linear-gradient(90deg, rgb(var(--c-sg-cyan)), rgb(var(--c-sg-cyan)))",
               transition: "width 0.6s cubic-bezier(0.4,0,0.2,1), background 0.5s",
               borderRadius: "9999px",
               boxShadow: overallProgress > 0 ? "0 0 8px rgba(31,95,163,0.5)" : "none",
@@ -490,10 +490,10 @@ export default function ScanProgress({ activeNode, status, seenNodes, done, erro
           }}
         >
           <svg className="w-4 h-4 shrink-0" viewBox="0 0 20 20" fill="none">
-            <circle cx="10" cy="10" r="9" fill="rgba(11,122,75,0.15)" stroke="#10B981" strokeWidth="1.5" />
-            <path d="M6.5 10.5l2.5 2.5 4.5-5" stroke="#10B981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            <circle cx="10" cy="10" r="9" fill="rgba(11,122,75,0.15)" stroke="rgb(var(--c-sg-green))" strokeWidth="1.5" />
+            <path d="M6.5 10.5l2.5 2.5 4.5-5" stroke="rgb(var(--c-sg-green))" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
-          <p className="text-xs" style={{ color: "#10B981" }}>
+          <p className="text-xs" style={{ color: "rgb(var(--c-sg-green))" }}>
             All agents complete · scrolling to results…
           </p>
         </div>

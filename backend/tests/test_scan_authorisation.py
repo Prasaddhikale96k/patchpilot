@@ -28,7 +28,7 @@ class TestNothingIsAuthorisedByDefault:
 
     def test_even_your_own_site_needs_declaring(self):
         """GitHub Pages is GitHub's infrastructure, not the author's."""
-        assert is_authorised("pushpenderrathore.github.io") is False
+        assert is_authorised("example-user.github.io") is False
 
     def test_the_reason_says_how_to_authorise(self):
         reason = refusal_reason("google.com")

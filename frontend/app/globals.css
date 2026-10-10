@@ -5,13 +5,37 @@
 @tailwind utilities;
 
 /* ── Light editorial theme ────────────────────────────────────────────── */
-:root {
+:root,
+:root[data-theme="dark"] {
   color-scheme: dark;
-  --cream: #0A0E12;
-  --paper: #11161B;
-  --line:  #1F2833;
-  --ink:   #F5F7FA;
-  --ink-muted: #8B96A5;
+  --c-bg: 10 14 18;  --c-surface: 17 22 27;  --c-border: 31 40 51;
+  --c-text: 245 247 250;  --c-muted: 139 150 165;  --c-soft: 201 209 219;
+  --c-accent: 16 185 129;  --c-danger: 239 68 68;  --c-warning: 245 158 11;  --c-info: 59 130 246;
+  --c-sg-green: 16 185 129;  --c-sg-red: 248 113 113;  --c-sg-yellow: 251 191 36;
+  --c-sg-cyan: 96 165 250;  --c-sg-purple: 167 139 250;
+  --c-bento-lavender: 36 31 69;  --c-bento-pink: 58 24 48;  --c-bento-blue: 18 42 63;
+  --c-bento-peach: 58 36 24;  --c-bento-mustard: 58 48 16;
+  --scroll-thumb: var(--scroll-thumb);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --c-bg: 247 248 250;  --c-surface: 255 255 255;  --c-border: 222 227 233;
+  --c-text: 15 23 42;  --c-muted: 91 102 117;  --c-soft: 51 65 85;
+  --c-accent: 4 120 87;  --c-danger: 220 38 38;  --c-warning: 180 83 9;  --c-info: 37 99 235;
+  --c-sg-green: 4 120 87;  --c-sg-red: 220 38 38;  --c-sg-yellow: 161 98 7;
+  --c-sg-cyan: 37 99 235;  --c-sg-purple: 109 40 217;
+  --c-bento-lavender: 233 227 251;  --c-bento-pink: 253 227 238;  --c-bento-blue: 220 235 250;
+  --c-bento-peach: 255 230 216;  --c-bento-mustard: 251 240 198;
+  --scroll-thumb: rgba(15, 23, 42, 0.22);
+}
+
+:root {
+  --cream: rgb(var(--c-bg));
+  --paper: rgb(var(--c-surface));
+  --line:  rgb(var(--c-border));
+  --ink:   rgb(var(--c-text));
+  --ink-muted: rgb(var(--c-muted));
 }
 
 html, body {
@@ -31,7 +55,7 @@ body {
 
 /* Visible, consistent keyboard focus everywhere */
 :focus-visible {
-  outline: 3px solid #10B981;
+  outline: 3px solid rgb(var(--c-accent));
   outline-offset: 2px;
   border-radius: 6px;
 }
@@ -39,13 +63,13 @@ body {
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: rgba(245, 247, 250, 0.2);
+  background: var(--scroll-thumb);
   border-radius: 999px;
   border: 2px solid var(--cream);
 }
-::-webkit-scrollbar-thumb:hover { background: rgba(245, 247, 250, 0.35); }
+::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb); }
 
-::selection { background-color: #10B981; color: #0A0E12; }
+::selection { background-color: rgb(var(--c-accent)); color: rgb(var(--c-bg)); }
 
 /* Terminal cursor */
 .cursor::after {
@@ -126,7 +150,7 @@ pre {
 
 .scrollable-area { @apply overflow-y-auto; }
 .scrollable-area::-webkit-scrollbar { width: 6px; }
-.scrollable-area::-webkit-scrollbar-thumb { background: rgba(245, 247, 250, 0.2); border-radius: 3px; }
+.scrollable-area::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 3px; }
 
 .skeleton {
   @apply rounded-xl bg-ink/10;
@@ -162,6 +186,17 @@ pre {
   .bento-card[data-interactive="true"]:hover,
   .btn-primary:hover { transform: none; }
 }
+
+/* Light theme: the pill and status text classes above are tuned for dark
+   backgrounds (-300 shades); use their -700 shades on a light surface. */
+:root[data-theme="light"] .text-red-300, :root[data-theme="light"] .text-red-400 { color: #b91c1c; }
+:root[data-theme="light"] .text-orange-300, :root[data-theme="light"] .text-orange-400 { color: #c2410c; }
+:root[data-theme="light"] .text-yellow-300, :root[data-theme="light"] .text-yellow-400, :root[data-theme="light"] .text-amber-300 { color: #a16207; }
+:root[data-theme="light"] .text-blue-300, :root[data-theme="light"] .text-blue-400, :root[data-theme="light"] .text-sky-300 { color: #1d4ed8; }
+:root[data-theme="light"] .text-purple-300, :root[data-theme="light"] .text-purple-400 { color: #6d28d9; }
+:root[data-theme="light"] .text-cyan-300, :root[data-theme="light"] .text-cyan-400 { color: #0e7490; }
+:root[data-theme="light"] .text-green-300, :root[data-theme="light"] .text-green-400,
+:root[data-theme="light"] .text-emerald-300, :root[data-theme="light"] .text-emerald-400 { color: #047857; }
 
 /* ── Legacy dark theme, scoped to the hidden ExamGuard module ─────────── */
 .legacy-theme {

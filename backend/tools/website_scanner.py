@@ -268,7 +268,7 @@ SECURITY_HEADERS = {
     "Permissions-Policy":           ("LOW",    "A05:2021-Security Misconfiguration"),
 }
 
-_HEADERS = {"User-Agent": "SentinelAI-SecurityScanner/1.0"}
+_HEADERS = {"User-Agent": "PatchPilot-SecurityScanner/1.0"}
 
 # ── Anti-bot / WAF detection ──────────────────────────────────────────────────
 # A site that refuses automated requests serves a challenge or block page, and

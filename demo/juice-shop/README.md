@@ -4,7 +4,7 @@ A reproducible fix-and-rescan loop against OWASP Juice Shop, run entirely on you
 own machine so it does not depend on anyone's uptime.
 
 Juice Shop is deliberately vulnerable and we do not patch it. The fix goes in
-front of it, which is the remediation SentinelAI recommends whenever a finding
+front of it, which is the remediation PatchPilot recommends whenever a finding
 cannot be fixed in the application itself.
 
 ## 1 - Start the target, unprotected

@@ -574,7 +574,7 @@ export default function RetentionPage() {
                   {items.length === 0 && (
                     <p className="text-sm text-sentinel-muted py-8 text-center">
                       No scans in this state. Run a scan from{" "}
-                      <a href="/scan" className="text-sentinel-cyan hover:underline">VulnSentinel</a> first.
+                      <a href="/scan" className="text-sentinel-cyan hover:underline">scanner</a> first.
                     </p>
                   )}
                 </div>

@@ -2,7 +2,7 @@
 Tests for the OSIRIS OSINT enrichment client.
 
 The network is stubbed throughout — the suite must not depend on osirisai.live
-being up, and these tests are about how SentinelAI handles the answers, not
+being up, and these tests are about how PatchPilot handles the answers, not
 about what the upstream datasets currently say.
 
 Two behaviours carry most of the weight:

@@ -37,7 +37,7 @@ export function StartScanCard({ runs }: { runs: RunListItem[] }) {
                title="Start a scan"
                eyebrow={last ? `${runs.length} recent run${runs.length === 1 ? "" : "s"} · last ${timeAgo(last.started_at)}` : "No runs yet"}>
       <p className="text-base sm:text-lg leading-relaxed text-ink/85 max-w-md">
-        Point SentinelAI at a GitHub repository or website. Static scanners and AI agents find the
+        Point PatchPilot at a GitHub repository or website. Static scanners and AI agents find the
         issues; an optional fix loop patches one and proves it in a Docker sandbox.
       </p>
       <ul className="mt-5 grid gap-2 text-sm font-semibold">

@@ -58,7 +58,7 @@ export const WS_BASE: string = (() => {
  */
 export function connectionErrorMessage(): string {
   return (
-    `Cannot connect to the SentinelAI backend at ${API_BASE}. ` +
+    `Cannot connect to the PatchPilot backend at ${API_BASE}. ` +
     `Check that the backend is running, that NEXT_PUBLIC_API_URL matches it ` +
     `(it is baked in at build time — rebuild after changing it), ` +
     `and that the backend ALLOWED_ORIGINS includes this page's origin.`

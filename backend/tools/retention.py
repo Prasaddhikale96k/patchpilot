@@ -26,7 +26,6 @@ import hashlib
 import json
 import logging
 import os
-import shutil
 import time
 from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, field
@@ -636,7 +635,9 @@ class RetentionStore:
                 "clone_workspace", C_ABSENT,
                 "No cloned repository remained for this scan.")
         try:
-            shutil.rmtree(path)
+            from tools.git_cloner import force_rmtree
+            if not force_rmtree(path):  # read-only .git packs on Windows
+                raise OSError("files remain after deletion")
             return ComponentResult(
                 "clone_workspace", C_DONE, f"Cloned repository at {path} removed.")
         except OSError as exc:

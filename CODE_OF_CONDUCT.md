@@ -2,7 +2,7 @@
 
 ## Our Pledge
 
-We as members, contributors, and maintainers pledge to make participation in the SentinelAI community a harassment-free experience for everyone, regardless of age, body size, disability, ethnicity, gender identity and expression, level of experience, nationality, personal appearance, race, religion, or sexual identity and orientation.
+We as members, contributors, and maintainers pledge to make participation in the PatchPilot community a harassment-free experience for everyone, regardless of age, body size, disability, ethnicity, gender identity and expression, level of experience, nationality, personal appearance, race, religion, or sexual identity and orientation.
 
 We pledge to act and interact in ways that contribute to an open, welcoming, diverse, inclusive, and healthy community.
 
@@ -37,7 +37,7 @@ This Code of Conduct applies within all project spaces, including:
 * Issues and Pull Requests
 * Discussions and community forums
 * Project documentation
-* Any official communication channels related to SentinelAI
+* Any official communication channels related to PatchPilot
 
 ## Enforcement
 
@@ -47,11 +47,11 @@ Project maintainers will review and investigate all reports fairly and appropria
 
 ## Attribution
 
-This Code of Conduct is inspired by the Contributor Covenant and adapted for the SentinelAI project.
+This Code of Conduct is inspired by the Contributor Covenant and adapted for the PatchPilot project.
 
 ---
 
-SentinelAI Project
+PatchPilot Project
 
 Auther: Saee Nikam          
 Co-Auther: Sonika Kaswan                   

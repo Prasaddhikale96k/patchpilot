@@ -51,7 +51,7 @@ class TestRemediateEndpoint:
         monkeypatch.setattr(
             "tools.run_artifacts.load_state_snapshot", lambda sid: snapshot)
 
-        async def fake_stream(state, run_id):
+        async def fake_stream(state, run_id, entry_point="secure_coder"):
             yield ("secure_coder", {"agent_logs": ["[SecureCoder] hi"],
                                     "attempts": 1,
                                     "test_verdict": "verified"})
@@ -84,3 +84,38 @@ class TestRemediateEndpoint:
         client = TestClient(app_main.app)
         resp = client.post("/api/remediate", json={"scan_id": "ghost-id"})
         assert resp.status_code == 404
+
+
+class TestCloneHygiene:
+    def test_force_rmtree_removes_read_only_git_packs(self, tmp_path):
+        """Windows left .git/objects/pack/*.pack (read-only) behind."""
+        import os
+        import stat
+        from tools.git_cloner import force_rmtree
+        pack = tmp_path / "clone" / ".git" / "objects" / "pack"
+        pack.mkdir(parents=True)
+        packfile = pack / "pack-1.pack"
+        packfile.write_bytes(b"x")
+        os.chmod(packfile, stat.S_IREAD)
+        os.chmod(pack, stat.S_IREAD | stat.S_IEXEC)
+        assert force_rmtree(str(tmp_path / "clone")) is True
+        assert not (tmp_path / "clone").exists()
+
+    def test_git_husk_is_not_a_usable_clone(self, tmp_path):
+        from tools.git_cloner import is_usable_clone
+        (tmp_path / "husk" / ".git").mkdir(parents=True)
+        assert is_usable_clone(str(tmp_path / "husk")) is False
+        (tmp_path / "husk" / "app.py").write_text("x = 1\n")
+        assert is_usable_clone(str(tmp_path / "husk")) is True
+
+    def test_ensure_repo_reclones_over_a_husk(self, tmp_path, monkeypatch):
+        import agents.remediation.loop as loop
+        import tools.git_cloner as gc
+        (tmp_path / "husk" / ".git").mkdir(parents=True)
+        cloned = []
+        monkeypatch.setattr(gc, "clone_repo",
+                            lambda url, rid: cloned.append(rid) or str(tmp_path / "fresh"))
+        state = loop._ensure_repo({"repo_path": str(tmp_path / "husk"),
+                                   "repo_url": "https://github.com/x/y"}, "s-r1")
+        assert cloned == ["s-r1"]
+        assert state["repo_path"] == str(tmp_path / "fresh")

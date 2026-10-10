@@ -1,14 +1,22 @@
 #requires -Version 5.1
 <#
 .SYNOPSIS
-  Start the SentinelAI backend on Windows (native PowerShell).
+  Start the PatchPilot backend on Windows (native PowerShell).
 .DESCRIPTION
   Reads HOST/PORT from .env when present (defaults 127.0.0.1:8000),
   activates .venv (creating it with dependencies on first run), and starts
   uvicorn with --reload. Equivalent of run.sh for bash.
 .EXAMPLE
   .\run.ps1
+.EXAMPLE
+  .\run.ps1 -NoReload            # demo: saving a .py file cannot kill a running scan
+.EXAMPLE
+  .\run.ps1 -NoReload -Port 8010
 #>
+param(
+    [switch]$NoReload,
+    [string]$Port = ""
+)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
@@ -16,6 +24,7 @@ $BackendDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location -LiteralPath $BackendDir
 
 $Host_Ip = "127.0.0.1"
+$PortArg = $Port
 $Port = "8000"
 $EnvFile = Join-Path $BackendDir ".env"
 if (Test-Path -LiteralPath $EnvFile) {
@@ -36,9 +45,16 @@ if (-not (Test-Path -LiteralPath $VenvPython)) {
     & $VenvPython -m pip install -r requirements.txt -r requirements-dev.txt
 }
 
+if ($PortArg -ne "") { $Port = $PortArg }
+
 # Activation-equivalent: venv console scripts (bandit, …) resolve even when
 # the venv was never formally activated.
 $env:PATH = "$(Join-Path $BackendDir '.venv\Scripts');$env:PATH"
 
 Write-Host "Backend: http://${Host_Ip}:${Port}  docs: http://${Host_Ip}:${Port}/docs"
-& $VenvPython -m uvicorn main:app --host $Host_Ip --port $Port --reload
+if ($NoReload) {
+    Write-Host "Auto-reload OFF (demo mode)"
+    & $VenvPython -m uvicorn main:app --host $Host_Ip --port $Port
+} else {
+    & $VenvPython -m uvicorn main:app --host $Host_Ip --port $Port --reload --reload-exclude "runs"
+}

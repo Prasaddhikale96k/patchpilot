@@ -60,8 +60,8 @@ export function ParallelAgentsVisual() {
           <motion.li
             key={name}
             className="flex min-h-[5.5rem] flex-col items-center justify-center gap-2 rounded-lg border bg-bg p-2 text-center text-base"
-            style={{ borderColor: "#1F2833" }}
-            animate={reduce ? { borderColor: "#10B981" } : { borderColor: ["#1F2833", "#1F2833", "#10B981", "#10B981", "#1F2833"] }}
+            style={{ borderColor: "rgba(16,185,129,0.18)" }}
+            animate={reduce ? { borderColor: "#10B981" } : { borderColor: ["rgba(16,185,129,0.18)", "rgba(16,185,129,0.18)", "#10B981", "#10B981", "rgba(16,185,129,0.18)"] }}
             transition={reduce ? undefined : { duration: CYCLE, times: [0, 0.45 + i * 0.08, 0.5 + i * 0.08, 0.92, 1], repeat: Infinity }}
           >
             <Icon aria-hidden className="h-6 w-6 text-accent" />

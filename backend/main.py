@@ -1,5 +1,5 @@
 """
-SentinelAI — FastAPI backend
+PatchPilot — FastAPI backend
 
 ── VulnSentinel (code security) ──────────────────────────────
 POST /api/scan              Start a scan; returns scan_id + ws_url
@@ -124,7 +124,7 @@ def configure_logging(log_dir: str | Path | None = None) -> Path:
         console.addFilter(RedactingFilter())
         console._sentinel_console = True  # type: ignore[attr-defined]
         root.addHandler(console)
-    marker = str(log_path / "sentinelai.log")
+    marker = str(log_path / "patchpilot.log")
     if not any(getattr(h, "_sentinel_file", None) == marker
                for h in root.handlers):
         # Rotation bounds disk use (default 5 x 5 MB).
@@ -140,7 +140,7 @@ def configure_logging(log_dir: str | Path | None = None) -> Path:
 
 
 configure_logging()
-logger = logging.getLogger("sentinelai")
+logger = logging.getLogger("patchpilot")
 
 # ── Scan history persistence ──────────────────────────────────
 _HISTORY_FILE = Path(os.getenv("HISTORY_FILE", "scan_history.json"))
@@ -413,7 +413,7 @@ async def lifespan(app: FastAPI):
     _exam_sessions.clear()
 
 
-app = FastAPI(title="SentinelAI", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="PatchPilot", version="1.0.0", lifespan=lifespan)
 
 _default_origins = "http://localhost:3000,http://127.0.0.1:3000"
 # ALLOWED_ORIGIN_REGEX is handy for Vercel preview URLs, e.g.

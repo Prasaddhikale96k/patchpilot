@@ -70,3 +70,15 @@ class TestApply:
         with pytest.raises(PatchApplyError, match="outside the repo"):
             apply_blocks(str(tmp_path),
                          parse_blocks(_patch_text("../../etc/x", "a", "b")))
+
+
+def test_diff_headers_use_forward_slashes(tmp_path):
+    """Windows produced `a/app\routes.py` headers (seen in E2E 10335666)."""
+    from tools.patch_apply import PatchBlock, apply_blocks
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "routes.py").write_text("x = 1\n")
+    result = apply_blocks(str(tmp_path), [PatchBlock("app/routes.py", "x = 1\n", "x = 2\n")])
+    assert "--- a/app/routes.py" in result.diff
+    assert "+++ b/app/routes.py" in result.diff
+    assert "\\" not in result.diff
+    assert result.files_changed == ["app/routes.py"]

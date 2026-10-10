@@ -248,7 +248,7 @@ export default function ScanDashboard({ params }: { params: { id: string } }) {
       {/* Top bar */}
       <header className="shrink-0 flex items-center gap-3 px-5 py-3 border-b border-sentinel-border bg-sentinel-surface">
         <a href="/scan" className="text-sentinel-muted hover:text-ink transition-colors text-sm">
-          ← VulnSentinel
+          ← New scan
         </a>
         <span className="text-sentinel-border">·</span>
         <span className="text-xs font-mono text-sentinel-muted">scan/{scanId}</span>

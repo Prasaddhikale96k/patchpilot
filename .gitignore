@@ -25,6 +25,12 @@ tsconfig.tsbuildinfo
 # PatchForge run artifacts (diffs, transcripts, exploit tests per scan)
 backend/runs/
 
+# Backend file logs (timestamps, PIDs, scan phases, tracebacks — no secrets)
+backend/logs/
+
+# Durable scan registry (SQLite: run status, errors, report references)
+backend/data/
+
 # OS
 .DS_Store
 Thumbs.db

@@ -62,20 +62,20 @@ function TrendChart({ scans }: { scans: ScanHistoryRecord[] }) {
               <line
                 x1={padX} x2={W - padX}
                 y1={toY(v)} y2={toY(v)}
-                stroke="#1F2833" strokeWidth="0.5"
+                stroke="rgb(var(--c-border))" strokeWidth="0.5"
               />
-              <text x={padX - 1} y={toY(v) + 1} fill="#5E5747" fontSize="4" textAnchor="end">{v}</text>
+              <text x={padX - 1} y={toY(v) + 1} fill="rgb(var(--c-muted))" fontSize="4" textAnchor="end">{v}</text>
             </g>
           ))}
           {/* Fill */}
-          <polygon points={fillPts} fill="#60A5FA" fillOpacity="0.06" />
+          <polygon points={fillPts} fill="rgb(var(--c-sg-cyan))" fillOpacity="0.06" />
           {/* Line */}
-          <polyline points={pts} fill="none" stroke="#60A5FA" strokeWidth="1.5" strokeLinejoin="round"/>
+          <polyline points={pts} fill="none" stroke="rgb(var(--c-sg-cyan))" strokeWidth="1.5" strokeLinejoin="round"/>
           {/* Dots */}
           {sorted.map((s, i) => (
             <circle key={i} cx={toX(i)} cy={toY(s.risk_score)} r="2.5"
-                    fill={s.risk_score >= 75 ? "#F87171" : s.risk_score >= 50 ? "#FB923C" : s.risk_score >= 25 ? "#A16207" : "#10B981"}
-                    stroke="#11161B" strokeWidth="1"/>
+                    fill={s.risk_score >= 75 ? "rgb(var(--c-sg-red))" : s.risk_score >= 50 ? "rgb(var(--c-sg-yellow))" : s.risk_score >= 25 ? "rgb(var(--c-sg-yellow))" : "rgb(var(--c-sg-green))"}
+                    stroke="rgb(var(--c-surface))" strokeWidth="1"/>
           ))}
         </svg>
       </div>
