@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 logger = logging.getLogger(__name__)
 
 _BLOCK_RE = re.compile(
-    r"^FILE:\s*(?P<file>.+?)\s*$\n"
+    r"(?:^FILE:\s*(?P<file>.+?)\s*$\n)?"
     r"^<<<<<<<\s*SEARCH\s*$\n"
     r"(?P<search>.*?)"
     r"^=======\s*$\n"
@@ -54,13 +54,31 @@ class AppliedPatch:
 
 
 def parse_blocks(text: str) -> list[PatchBlock]:
-    """Parse every FILE:/SEARCH/REPLACE block; raises on empty result."""
-    blocks = [PatchBlock(file=m.group("file").strip(),
-                         search=m.group("search"),
-                         replace=m.group("replace"))
-              for m in _BLOCK_RE.finditer(text or "")]
+    """Parse every SEARCH/REPLACE block; raises on empty or partial results.
+
+    A block without its own FILE: line inherits the previous block's file
+    (models often write FILE: once and then several blocks). Silently
+    dropping such a block used to discard half of a patch, so any marker
+    that does not parse into a block is an error the coder can act on.
+    """
+    blocks: list[PatchBlock] = []
+    current_file = ""
+    for m in _BLOCK_RE.finditer(text or ""):
+        current_file = (m.group("file") or current_file).strip()
+        if not current_file:
+            raise PatchApplyError(
+                "A SEARCH/REPLACE block has no FILE: line before it.")
+        blocks.append(PatchBlock(file=current_file,
+                                 search=m.group("search"),
+                                 replace=m.group("replace")))
     if not blocks:
         raise PatchApplyError("No FILE:/SEARCH/REPLACE blocks found in patch.")
+    markers = len(re.findall(r"^<<<<<<<\s*SEARCH\s*$", text or "", re.MULTILINE))
+    if markers != len(blocks):
+        raise PatchApplyError(
+            f"Found {markers} SEARCH markers but only {len(blocks)} complete "
+            f"blocks parsed; every block needs <<<<<<< SEARCH, =======, "
+            f">>>>>>> REPLACE.")
     return blocks
 
 
@@ -162,11 +180,13 @@ def apply_blocks(repo_root: str, blocks: list[PatchBlock]) -> AppliedPatch:
         old_text = before[target]
         if new_text == old_text:
             continue
-        rel = os.path.relpath(target, os.path.realpath(repo_root))
+        # POSIX separators: Windows backslashes in diff headers break
+        # `git apply` and every consumer keyed on the file path.
+        rel = os.path.relpath(target, os.path.realpath(repo_root)).replace("\\", "/")
         os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
         with open(target, "w", encoding="utf-8", newline="") as handle:
             handle.write(new_text)
-        result.files_changed.append(rel.replace("\\", "/"))
+        result.files_changed.append(rel)
         diff_lines.extend(difflib.unified_diff(
             old_text.splitlines(), new_text.splitlines(),
             fromfile=f"a/{rel}", tofile=f"b/{rel}", lineterm=""))

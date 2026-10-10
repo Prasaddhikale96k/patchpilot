@@ -16,7 +16,7 @@ import re
 import shutil
 from pathlib import Path
 
-from ..llm_router import invoke_llm, model_for_attempt
+from ..llm_router import invoke_llm, model_for_attempt, reasoning_effort
 
 logger = logging.getLogger(__name__)
 
@@ -246,19 +246,35 @@ def secure_coder_node(state: dict) -> dict:
         f"## fix_suggester hint\n{suggester_hint}\n\n"
         f"## Previous feedback\n{feedback_text}\n"
     )
-    if attempt > 0 and feedback:
-        prompt = ("Your previous patch failed. Here is exactly why:\n"
-                  f"{feedback_text}\n\nFix the patch AND the test.\n\n" + prompt)
+    if attempt > 0:
+        prev = state.get("code_patch") or {}
+        prev_diff = (prev.get("diff") or "").strip()
+        review = state.get("review") or {}
+        failed_checks = "\n".join(
+            f"- {c.get('name')}: {c.get('detail')}"
+            for c in review.get("checks", []) if not c.get("passed")) or "(none)"
+        issues = "\n".join(
+            f"- [{i.get('severity', '?')}] {i.get('comment', '')}"
+            for i in (review.get("llm") or {}).get("issues", [])) or "(none)"
+        diff_text = prev_diff[:6000] or "(no diff was produced)"
+        prompt = (
+            "Your previous patch FAILED. Learn from it and do not repeat it.\n\n"
+            f"## Your previous diff\n```diff\n{diff_text}\n```\n\n"
+            f"## Reviewer failed checks\n{failed_checks}\n\n"
+            f"## Reviewer issues\n{issues}\n\n"
+            f"## Reviewer / Tester feedback\n{feedback_text}\n\n"
+            "Fix the vulnerable code itself AND the test.\n\n" + prompt)
     save_text(scan_id, "secure_coder_prompt.md", prompt)
 
     # ── LLM (model escalation per attempt, router falls back on failure) ──
     from ..llm_router import LLMUnavailableError
     provider, model = model_for_attempt(attempt + 1)
-    logs.append(f"[SecureCoder] Model: {provider}/{model} "
-                f"(attempt {attempt + 1}/{max_attempts})")
+    logs.append(f"[SecureCoder] Attempt {attempt + 1}/{max_attempts} "
+                f"using {provider}/{model}")
     messages = [{"role": "user", "content": prompt}]
     try:
-        reply = invoke_llm(messages, model=f"{provider}:{model}")
+        with reasoning_effort("high"):
+            reply = invoke_llm(messages, model=f"{provider}:{model}")
     except LLMUnavailableError as exc:
         save_text(scan_id, "secure_coder_error.txt", exc.reason)
         return {
@@ -275,7 +291,8 @@ def secure_coder_node(state: dict) -> dict:
     def _fresh_work_dir() -> str:
         work_dir = f"{repo_path}_work_{attempt + 1}"
         if os.path.isdir(work_dir):
-            shutil.rmtree(work_dir, ignore_errors=True)
+            from tools.git_cloner import force_rmtree
+            force_rmtree(work_dir)
         shutil.copytree(repo_path, work_dir,
                         ignore=shutil.ignore_patterns(
                             "node_modules", ".venv", "__pycache__",
@@ -284,9 +301,20 @@ def secure_coder_node(state: dict) -> dict:
 
     def _attempt_apply(blocks_text: str, test_text: str,
                        work_dir: str) -> tuple[dict, str]:
-        patch_blocks = parse_blocks(blocks_text)
-        applied = apply_blocks(work_dir, patch_blocks)
-        test_blocks = parse_blocks(test_text)
+        try:
+            patch_blocks = parse_blocks(blocks_text)
+        except PatchApplyError as exc:
+            raise PatchApplyError(f"PATCH section: {exc}")
+        try:
+            applied = apply_blocks(work_dir, patch_blocks)
+        except PatchApplyError as exc:
+            raise PatchApplyError(f"PATCH section: {exc}")
+        try:
+            test_blocks = parse_blocks(test_text)
+        except PatchApplyError as exc:
+            raise PatchApplyError(f"TEST section: {exc} "
+                                  f"(it must be one new-file block: FILE line, "
+                                  f"empty SEARCH, test content as REPLACE)")
         if len(test_blocks) != 1 or test_blocks[0].search.strip():
             raise PatchApplyError(
                 "TEST section must hold exactly one new-file block "
@@ -310,10 +338,14 @@ def secure_coder_node(state: dict) -> dict:
         repair_prompt = (
             f"{prompt}\n\nYour previous output failed to apply with this "
             f"exact error:\n{exc}\n\nReturn the FULL corrected ### RATIONALE, "
-            f"### PATCH and ### TEST again.")
+            f"### PATCH and ### TEST again. Both PATCH and TEST sections "
+            f"must use the exact FILE:/<<<<<<<< SEARCH/========/>>>>>>>> "
+            f"REPLACE block format — the TEST section is one new-file block "
+            f"with an empty SEARCH, not raw code.")
         try:
-            repair = invoke_llm([{"role": "user", "content": repair_prompt}],
-                                model=f"{provider}:{model}")
+            with reasoning_effort("high"):
+                repair = invoke_llm([{"role": "user", "content": repair_prompt}],
+                                    model=f"{provider}:{model}")
         except LLMUnavailableError as llm_exc:
             return {
                 "attempts": attempt + 1,
@@ -333,11 +365,20 @@ def secure_coder_node(state: dict) -> dict:
             logs.append("[SecureCoder] Repair output applied cleanly.")
         except PatchApplyError as exc2:
             save_text(scan_id, "secure_coder_error.txt", str(exc2))
+            # Retriable marker: the graph routes back to SecureCoder while
+            # attempts remain (bounded correction). Prior feedback (e.g. a
+            # regression the next patch must avoid) is preserved ahead of
+            # the parse error so the retry sees both, newest last.
+            retry_feedback = list(feedback) + [
+                f"Patch apply failed: {exc2} Fix the block format AND "
+                f"re-emit the full ### RATIONALE, ### PATCH and ### TEST. "
+                f"Copy SEARCH text exactly from the numbered source."]
             return {
                 "attempts": attempt + 1,
                 "target_vuln": target,
                 "work_dir": work_dir,
                 "remediation_status": "failed",
+                "feedback": retry_feedback[-4:],
                 "agent_logs": logs + [f"[SecureCoder] Repair failed: {exc2}"],
             }
 

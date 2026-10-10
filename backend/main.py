@@ -59,6 +59,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -66,9 +67,14 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from dotenv import load_dotenv
-load_dotenv()
+# Tests set SENTINEL_DISABLE_DOTENV so a developer's real keys never turn
+# unit tests into live (paid) provider calls.
+if not os.getenv("SENTINEL_DISABLE_DOTENV"):
+    load_dotenv()
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import (FastAPI, Header, HTTPException, Response, WebSocket,
+                     WebSocketDisconnect)
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 
@@ -78,6 +84,8 @@ from tools.url_guard import assert_safe_target, UnsafeTargetError
 from tools.git_cloner import cleanup_repo, _repo_dest
 from tools import retention as rt
 from tools import osiris
+from tools import scan_store as ss
+from tools.scan_store import ScanStore
 from exam_agents.exam_pipeline import _exam_graph, stream_exam_analysis
 from exam_agents.exam_state import ExamSession
 from exam_agents.event_rules import (
@@ -88,7 +96,49 @@ from exam_agents.event_rules import (
     check_phone_detected,
 )
 
-logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(name)s  %(message)s")
+def configure_logging(log_dir: str | Path | None = None) -> Path:
+    """Console + persistent file logging with timestamps and PID.
+
+    The file log (gitignored backend/logs/) survives console loss and
+    worker restarts, so a vanished in-memory scan can still be diagnosed.
+    Never log secrets here: callers must pass ids/counts only.
+    """
+    from logging.handlers import RotatingFileHandler
+    from tools.log_safety import RedactingFilter, RedactingFormatter
+
+    if log_dir:
+        log_path = Path(log_dir)
+    elif os.getenv("SENTINEL_LOG_DIR"):
+        log_path = Path(os.environ["SENTINEL_LOG_DIR"])
+    else:
+        log_path = Path(__file__).resolve().parent / "logs"
+    log_path.mkdir(parents=True, exist_ok=True)
+    fmt = RedactingFormatter(
+        "%(asctime)s pid=%(process)d %(levelname)s %(name)s %(message)s")
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    if not any(getattr(h, "_sentinel_console", False) for h in root.handlers):
+        console = logging.StreamHandler()
+        console.setFormatter(fmt)
+        console.addFilter(RedactingFilter())
+        console._sentinel_console = True  # type: ignore[attr-defined]
+        root.addHandler(console)
+    marker = str(log_path / "sentinelai.log")
+    if not any(getattr(h, "_sentinel_file", None) == marker
+               for h in root.handlers):
+        # Rotation bounds disk use (default 5 x 5 MB).
+        fh = RotatingFileHandler(
+            marker, encoding="utf-8",
+            maxBytes=int(os.getenv("LOG_MAX_BYTES", str(5 * 1024 * 1024))),
+            backupCount=int(os.getenv("LOG_BACKUP_COUNT", "5")))
+        fh.setFormatter(fmt)
+        fh.addFilter(RedactingFilter())
+        fh._sentinel_file = marker  # type: ignore[attr-defined]
+        root.addHandler(fh)
+    return Path(marker)
+
+
+configure_logging()
 logger = logging.getLogger("sentinelai")
 
 # ── Scan history persistence ──────────────────────────────────
@@ -181,13 +231,95 @@ ANALYSIS_TIMEOUT_SECS  = float(os.getenv("ANALYSIS_TIMEOUT_SECS", "300"))
 SESSION_TTL_SECS       = float(os.getenv("SESSION_TTL_SECS", str(24 * 3600)))
 JANITOR_INTERVAL_SECS  = float(os.getenv("JANITOR_INTERVAL_SECS", "600"))
 MAX_EVENTS_PER_LIST    = int(os.getenv("MAX_EVENTS_PER_LIST", "5000"))
+# Upper bound on graph steps (each retry adds coder→reviewer→tester), so a
+# routing bug fails the scan instead of spinning.
+GRAPH_RECURSION_LIMIT  = int(os.getenv("GRAPH_RECURSION_LIMIT", "60"))
+# Seconds a client should wait before re-polling an unfinished report.
+REPORT_RETRY_AFTER_SECS = int(os.getenv("REPORT_RETRY_AFTER_SECS", "3"))
 
 # Phone detection runs client-side (coco-ssd in the browser); the browser
 # sends a `phone_detected` event, handled below. No server-side ML needed.
 
 # ── In-process registries ─────────────────────────────────────
+# _scans holds only what cannot be persisted: live WebSocket subscribers and
+# the in-process event buffer. The durable lifecycle (status, phase, error,
+# report) lives in _store, so a restart or a second backend process can
+# still answer for a scan instead of 404ing it (scan ebd4ddea).
 _scans: Dict[str, dict] = {}           # VulnSentinel scan sessions
 _exam_sessions: Dict[str, dict] = {}   # ExamGuard sessions
+_store = ScanStore()
+_background_tasks: set[asyncio.Task] = set()  # strong refs: no GC'd scans
+HEARTBEAT_SECS = float(os.getenv("SCAN_HEARTBEAT_SECS", "15"))
+_MAX_BUFFERED_EVENTS = 2000
+
+
+def _new_session(repo_url: str) -> dict:
+    return {
+        "queue": None,          # legacy key; subscribers replace it
+        "subscribers": set(),   # one asyncio.Queue per connected WS client
+        "events": [],           # replay buffer for late/reconnecting clients
+        "report": None,
+        "status": "starting",
+        "error": None,
+        "repo_url": repo_url,
+        "started_at": time.time(),
+    }
+
+
+async def _publish(scan_id: str, msg: dict | None) -> None:
+    """Fan a message out to every WS subscriber; buffer + persist it.
+
+    None is the end-of-stream sentinel. Previously one shared queue meant
+    two tabs split the messages between them and a refreshed tab lost
+    every earlier log line.
+    """
+    session = _scans.get(scan_id)
+    if session is None:
+        return
+    if msg is not None:
+        events = session.setdefault("events", [])
+        events.append(msg)
+        if len(events) > _MAX_BUFFERED_EVENTS:
+            del events[: len(events) - _MAX_BUFFERED_EVENTS]
+        if msg.get("type") == "update":
+            _store.append_event(scan_id, msg)
+    else:
+        session["closed"] = True
+    for q in list(session.get("subscribers", ())):
+        await q.put(msg)
+
+
+def _spawn(coro) -> asyncio.Task:
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return task
+
+
+async def _heartbeat(scan_id: str) -> None:
+    """Keep the durable row fresh so other processes know we're alive."""
+    while True:
+        await asyncio.sleep(HEARTBEAT_SECS)
+        try:
+            _store.heartbeat(scan_id)
+        except Exception:
+            logger.warning("Heartbeat failed for %s", scan_id, exc_info=True)
+
+
+def _report_summary(report: dict) -> dict:
+    """Small summary kept on the run row (listing without loading reports)."""
+    summary = report.get("summary") or {}
+    remediation = report.get("remediation") or {}
+    return {
+        "total_findings": len(report.get("vulnerabilities") or []),
+        "risk_score": summary.get("risk_score"),
+        "overall_risk": summary.get("overall_risk"),
+        "assessed": report.get("assessed", True),
+        "remediation_status": remediation.get("status"),
+        "test_verdict": remediation.get("test_verdict"),
+        "pr_url": (remediation.get("pr") or {}).get("url")
+                  or remediation.get("pr_url"),
+    }
 
 # Global multi-student monitor: fan-out queues for the class-wide host
 # dashboard, plus the latest trust snapshot per exam (so a dashboard that
@@ -257,9 +389,25 @@ async def lifespan(app: FastAPI):
         nodes = sorted(getattr(_graph, "nodes", {}).keys())
     except Exception:
         nodes = []
-    logger.info("Serving graph nodes: %s", nodes)
+    logger.info("Serving graph nodes: %s (db=%s)", nodes, _store.db_path)
+    # Runs whose process died (crash, --reload, kill) are marked interrupted
+    # here — never left "running" forever, never reported as completed.
+    recovered = _store.recover_stale()
+    if recovered:
+        logger.warning("Startup recovery: %d stale run(s) marked "
+                       "interrupted: %s", len(recovered), recovered)
+        # A crashed run never reached its `finally`; its clone and work
+        # copies would otherwise stay in the temp dir indefinitely.
+        for sid in recovered:
+            cleanup_repo(sid)
     yield
     janitor.cancel()
+    # Graceful shutdown: running scans are cancelled; their handlers record
+    # the interruption durably before the process exits.
+    for task in list(_background_tasks):
+        task.cancel()
+    if _background_tasks:
+        await asyncio.gather(*_background_tasks, return_exceptions=True)
     _scans.clear()
     _exam_sessions.clear()
 
@@ -269,9 +417,32 @@ app = FastAPI(title="SentinelAI", version="1.0.0", lifespan=lifespan)
 _default_origins = "http://localhost:3000,http://127.0.0.1:3000"
 # ALLOWED_ORIGIN_REGEX is handy for Vercel preview URLs, e.g.
 #   https://.*\.vercel\.app
+_ALLOWED_ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", _default_origins).split(",") if o.strip()]
+_ALLOWED_ORIGIN_RE = re.compile(os.getenv("ALLOWED_ORIGIN_REGEX")) if os.getenv("ALLOWED_ORIGIN_REGEX") else None
+_SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+
+
+@app.middleware("http")
+async def _reject_cross_site_writes(request, call_next):
+    """CSRF guard. CORS only hides responses; a browser still SENDS a
+    cross-site "simple" POST (form, no-cors fetch). Body-less endpoints
+    such as retention purge executed that way. Browsers always attach
+    Origin to cross-site writes, so a write from a non-allowed Origin is
+    refused; requests without Origin (curl, server-side) are unaffected."""
+    origin = request.headers.get("origin")
+    if (request.method not in _SAFE_METHODS and origin
+            and origin not in _ALLOWED_ORIGINS
+            and not (_ALLOWED_ORIGIN_RE and _ALLOWED_ORIGIN_RE.fullmatch(origin))):
+        logger.warning("Refused cross-site %s %s from origin %s",
+                       request.method, request.url.path, origin)
+        return JSONResponse(status_code=403,
+                            content={"detail": "Cross-site request refused (origin not allowed)."})
+    return await call_next(request)
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[o.strip() for o in os.getenv("ALLOWED_ORIGINS", _default_origins).split(",") if o.strip()],
+    allow_origins=_ALLOWED_ORIGINS,
     allow_origin_regex=os.getenv("ALLOWED_ORIGIN_REGEX") or None,
     allow_credentials=True,
     allow_methods=["*"],
@@ -304,6 +475,10 @@ class ScanResponse(BaseModel):
     scan_id: str
     ws_url: str
     status: str
+    # True when an identical request (same Idempotency-Key, or the same
+    # repo/options already running) was answered with the existing run
+    # instead of starting a second, separately billed one.
+    deduplicated: bool = False
 
 
 class ScanSummary(BaseModel):
@@ -311,11 +486,18 @@ class ScanSummary(BaseModel):
     repo_url: str
     status: str
     started_at: float
+    kind: str = "scan"
+    phase: str = ""
+    finished_at: Optional[float] = None
+    error: Optional[str] = None
 
 
 class RemediateRequest(BaseModel):
-    scan_id: str = Field(min_length=1, max_length=64)
+    scan_id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_\-]+$")
     target_hint: Optional[str] = Field(default=None, max_length=32)
+    # Explicit, separate consent for the remote write. False = generate,
+    # review and Docker-verify the patch, but never push or open a PR.
+    open_pr: bool = False
 
 
 # ══════════════════════════════════════════════════════════════
@@ -324,13 +506,18 @@ class RemediateRequest(BaseModel):
 
 async def _run_scan(repo_url: str, scan_id: str, create_pr: bool = False,
                   target_hint: Optional[str] = None) -> None:
-    queue: asyncio.Queue = _scans[scan_id]["queue"]
     accumulated: dict = {}
+    _store.mark_running(scan_id, "orchestrator")
+    _scans[scan_id]["status"] = "running"
+    beat = asyncio.create_task(_heartbeat(scan_id))
+    started = time.monotonic()
+    node_name = "orchestrator"
 
     try:
         state = _initial_state(repo_url, scan_id, create_pr=create_pr,
                                target_hint=target_hint)
-        config = {"configurable": {"thread_id": scan_id}}
+        config = {"configurable": {"thread_id": scan_id},
+                  "recursion_limit": GRAPH_RECURSION_LIMIT}
 
         async with asyncio.timeout(SCAN_TIMEOUT_SECS):
             async for event in _graph.astream(state, config=config):
@@ -345,66 +532,112 @@ async def _run_scan(repo_url: str, scan_id: str, create_pr: bool = False,
                     else:
                         accumulated[k] = v
 
-                await queue.put({
+                _store.update_phase(scan_id, node_name)
+                await _publish(scan_id, {
                     "type": "update",
                     "node": node_name,
                     "logs": node_output.get("agent_logs", []),
                     "status": node_output.get("status", ""),
                     "scan_id": scan_id,
                 })
+                logger.info("Scan %s node %s status=%s (%d log lines, %.1fs)",
+                            scan_id, node_name,
+                            node_output.get("status", ""),
+                            len(node_output.get("agent_logs", [])),
+                            time.monotonic() - started)
 
-        report = accumulated.get("report", {})
+        report = accumulated.get("report") or {}
+        if not report:
+            raise RuntimeError("graph finished without producing a report")
+        # Durable first: a client that sees "done" can always fetch it.
+        _store.complete(scan_id, report, _report_summary(report))
         _scans[scan_id]["report"] = report
         _scans[scan_id]["status"] = "done"
-
-        await queue.put({"type": "done", "scan_id": scan_id, "report": report})
+        await _publish(scan_id, {"type": "done", "scan_id": scan_id,
+                                 "report": report})
+        logger.info("Scan %s completed (%d findings, %.1fs)", scan_id,
+                    len(report.get("vulnerabilities") or []),
+                    time.monotonic() - started)
 
         # Persist to history only on successful completion
         await _append_scan_history(scan_id, repo_url, report, _scans[scan_id]["started_at"])
 
     except TimeoutError:
-        logger.error("Scan %s exceeded %ss timeout", scan_id, SCAN_TIMEOUT_SECS)
-        _scans[scan_id]["status"] = "error"
-        _scans[scan_id]["error"] = f"Scan timed out after {int(SCAN_TIMEOUT_SECS)}s"
-        await queue.put({"type": "error", "scan_id": scan_id,
-                         "message": _scans[scan_id]["error"]})
+        logger.error("Scan %s exceeded %ss timeout in node %s", scan_id,
+                     SCAN_TIMEOUT_SECS, node_name)
+        await _fail_run(scan_id, f"Scan timed out after "
+                                 f"{int(SCAN_TIMEOUT_SECS)}s", "timeout")
 
     except LLMUnavailableError as exc:
         # An operational fault, not a bug. Collapsing it into "internal error"
         # meant a dead API key and a crash in the pipeline looked identical from
         # the browser, and only the server logs could tell them apart.
         logger.error("Scan %s could not reach a language model: %s", scan_id, exc)
-        _scans[scan_id]["status"] = "error"
-        _scans[scan_id]["error"] = (f"{exc.reason} The scan could not run. "
-                                    "Nothing was written to scan history.")
-        await queue.put({"type": "error", "scan_id": scan_id,
-                         "kind": "llm_unavailable",
-                         "message": _scans[scan_id]["error"]})
+        await _fail_run(scan_id, f"{exc.reason} The scan could not run. "
+                                 "Nothing was written to scan history.",
+                        "llm_unavailable")
+
+    except asyncio.CancelledError:
+        logger.warning("Scan %s cancelled (backend shutting down) in node %s",
+                       scan_id, node_name)
+        await _fail_run(scan_id, "The backend shut down while this scan was "
+                                 "running. It did not complete; start a new "
+                                 "scan.", "interrupted",
+                        status=ss.INTERRUPTED)
+        raise
 
     except Exception:
-        logger.exception("Scan %s crashed", scan_id)
-        _scans[scan_id]["status"] = "error"
-        _scans[scan_id]["error"] = ("Scan failed due to an internal error. "
-                                    "See server logs.")
-        await queue.put({"type": "error", "scan_id": scan_id,
-                         "kind": "internal",
-                         "message": _scans[scan_id]["error"]})
+        logger.exception("Scan %s crashed after node %s", scan_id, node_name)
+        await _fail_run(scan_id, "Scan failed due to an internal error. "
+                                 "See server logs.", "internal")
 
     finally:
+        beat.cancel()
         cleanup_repo(scan_id)  # remove cloned repo, if any
-        await queue.put(None)  # sentinel — unblocks the WebSocket reader
+        await _publish(scan_id, None)  # sentinel — unblocks WebSocket readers
+
+
+async def _fail_run(scan_id: str, message: str, kind: str,
+                    status: str = ss.FAILED) -> None:
+    """Record a terminal failure durably, then tell live clients."""
+    try:
+        _store.fail(scan_id, message, kind, status=status)
+    except Exception:
+        logger.exception("Could not persist failure of %s", scan_id)
+    session = _scans.get(scan_id)
+    if session is not None:
+        session["status"] = "error"
+        session["error"] = message
+    await _publish(scan_id, {"type": "error", "scan_id": scan_id,
+                             "kind": kind, "message": message})
 
 
 # ══════════════════════════════════════════════════════════════
 #  REST endpoints
 # ══════════════════════════════════════════════════════════════
 
-@app.post("/api/scan", response_model=ScanResponse, status_code=201)
-async def start_scan(req: ScanRequest) -> ScanResponse:
+def _enforce_capacity() -> None:
+    """Scans and remediation runs share one cap: each holds LLM + Docker."""
     active = sum(1 for s in _scans.values() if s["status"] not in ("done", "error"))
     if active >= MAX_CONCURRENT_SCANS:
-        raise HTTPException(status_code=429,
-                            detail=f"Too many scans in progress ({active}/{MAX_CONCURRENT_SCANS}) — try again shortly")
+        raise HTTPException(
+            status_code=429,
+            detail=f"Too many runs in progress ({active}/{MAX_CONCURRENT_SCANS}) — try again shortly")
+
+
+def _existing_run_response(rec: dict, response: Response) -> ScanResponse:
+    response.status_code = 200
+    return ScanResponse(scan_id=rec["scan_id"], ws_url=f"/ws/{rec['scan_id']}",
+                        status=rec["status"], deduplicated=True)
+
+
+@app.post("/api/scan", response_model=ScanResponse, status_code=201)
+async def start_scan(
+    req: ScanRequest,
+    response: Response,
+    idempotency_key: Optional[str] = Header(default=None, max_length=128),
+) -> ScanResponse:
+    _enforce_capacity()
 
     try:
         # Resolve in a thread — getaddrinfo blocks
@@ -414,133 +647,318 @@ async def start_scan(req: ScanRequest) -> ScanResponse:
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
-    scan_id = str(uuid.uuid4())[:8]
-    _scans[scan_id] = {
-        "queue": asyncio.Queue(),
-        "report": None,
-        "status": "starting",
-        "error": None,
-        "repo_url": req.repo_url,
-        "started_at": time.time(),
-    }
-    asyncio.create_task(_run_scan(req.repo_url, scan_id,
-                                  create_pr=req.create_pr,
-                                  target_hint=req.target_hint))
-    logger.info("Scan %s started for %s", scan_id, req.repo_url)
+    # A double-click or a client retry must not start (and bill) a second
+    # scan: the same Idempotency-Key, or an identical run still in flight,
+    # returns the existing scan id with 200 instead of 201. The check and
+    # the insert are one DB transaction, so it also holds across workers.
+    scan_id = _new_run_id()
+    # Re-checked after the DNS await above, with no await before the insert,
+    # so concurrent distinct requests cannot all slip past the cap.
+    _enforce_capacity()
+    rec, created = _store.create_unless_duplicate(
+        scan_id, repo_url=req.repo_url, create_pr=req.create_pr,
+        target_hint=req.target_hint, idempotency_key=idempotency_key)
+    if not created:
+        logger.info("Scan request deduplicated -> existing run %s",
+                    rec["scan_id"])
+        return _existing_run_response(rec, response)
+    _scans[scan_id] = _new_session(req.repo_url)
+    _spawn(_run_scan(req.repo_url, scan_id,
+                     create_pr=req.create_pr,
+                     target_hint=req.target_hint))
+    logger.info("Scan %s started for %s (create_pr=%s)", scan_id,
+                req.repo_url, req.create_pr)
     return ScanResponse(scan_id=scan_id, ws_url=f"/ws/{scan_id}", status="starting")
 
 
-async def _run_remediation_task(run_id: str, state: dict) -> None:
+def _new_run_id() -> str:
+    """8 hex chars, re-drawn on the (rare) collision with a stored run."""
+    for _ in range(10):
+        candidate = uuid.uuid4().hex[:8]
+        if candidate not in _scans and _store.get(candidate) is None:
+            return candidate
+    return uuid.uuid4().hex
+
+
+async def _run_remediation_task(run_id: str, state: dict,
+                                  entry_point: str = "secure_coder") -> None:
     """Stream the small remediation graph over the same WS format as scans."""
     from agents.remediation.loop import stream_remediation
 
-    queue: asyncio.Queue = _scans[run_id]["queue"]
+    from agents.remediation.report import build_remediation_section
+
+    if entry_point not in ("secure_coder", "reviewer", "tester", "pr_creator"):
+        entry_point = "secure_coder"
     accumulated: dict = dict(state)
+    _store.mark_running(run_id, entry_point)
+    _scans[run_id]["status"] = "running"
+    beat = asyncio.create_task(_heartbeat(run_id))
+    node_name = entry_point
     try:
-        async for node_name, node_output in stream_remediation(state, run_id):
-            for key, value in node_output.items():
-                if key == "agent_logs":
-                    accumulated.setdefault("agent_logs", [])
-                    accumulated["agent_logs"].extend(value)
-                else:
-                    accumulated[key] = value
-            await queue.put({
+        resume_reason = state.get("_resume_reason")
+        resume_source = state.get("_resume_source")
+        if resume_reason and entry_point != "secure_coder":
+            _store.update_phase(run_id, entry_point)
+            await _publish(run_id, {
                 "type": "update",
-                "node": node_name,
-                "logs": node_output.get("agent_logs", []),
-                "status": node_output.get("status", ""),
+                "node": entry_point,
+                "logs": [f"[Resume] {resume_reason}"],
+                "status": "",
                 "scan_id": run_id,
             })
+            accumulated.setdefault("agent_logs", []).append(
+                f"[Resume] {resume_reason}")
+            logger.info("Remediation %s resuming at %s from %s", run_id,
+                        entry_point, resume_source)
+        async with asyncio.timeout(SCAN_TIMEOUT_SECS):
+            async for node_name, node_output in stream_remediation(
+                    state, run_id, entry_point):
+                for key, value in node_output.items():
+                    if key == "agent_logs":
+                        accumulated.setdefault("agent_logs", [])
+                        accumulated["agent_logs"].extend(value)
+                    else:
+                        accumulated[key] = value
+                _store.update_phase(run_id, node_name)
+                await _publish(run_id, {
+                    "type": "update",
+                    "node": node_name,
+                    "logs": node_output.get("agent_logs", []),
+                    "status": node_output.get("status", ""),
+                    "scan_id": run_id,
+                })
+                logger.info("Remediation %s node %s (%d log lines)", run_id,
+                            node_name, len(node_output.get("agent_logs", [])))
 
-        test_reports = accumulated.get("test_reports", {}) or {}
+        remediation = build_remediation_section(accumulated)
         report = {
             "scan_id": run_id,
+            "kind": "remediation",
+            "parent_scan_id": state.get("parent_scan_id"),
             "repo_url": accumulated.get("repo_url", ""),
-            "remediation": {
-                "status": accumulated.get("remediation_status", "failed"),
-                "target_vuln": accumulated.get("target_vuln"),
-                "attempts": accumulated.get("attempts", 0),
-                "test_verdict": accumulated.get("test_verdict"),
-                "pr_url": accumulated.get("pr_url"),
-                "phases": {phase: {
-                    "passed": rep.get("passed", 0),
-                    "total": rep.get("total", 0),
-                    "failed": rep.get("failed", 0),
-                } for phase, rep in test_reports.items()
-                    if isinstance(rep, dict)},
-            },
+            "vulnerabilities": accumulated.get("vulnerabilities", []),
+            "remediation": remediation,
         }
+        _store.complete(run_id, report, _report_summary(report))
         _scans[run_id]["report"] = report
         _scans[run_id]["status"] = "done"
-        await queue.put({"type": "done", "scan_id": run_id, "report": report})
-    except Exception as exc:
-        logger.exception("Remediation %s crashed", run_id)
-        _scans[run_id]["status"] = "error"
-        _scans[run_id]["error"] = str(exc) or "Remediation failed."
-        await queue.put({"type": "error", "scan_id": run_id,
-                         "message": _scans[run_id]["error"]})
+        await _publish(run_id, {"type": "done", "scan_id": run_id,
+                                "report": report})
+        logger.info("Remediation %s completed: outcome=%s verdict=%s",
+                    run_id, remediation["outcome"],
+                    remediation["test_verdict"])
+    except TimeoutError:
+        logger.error("Remediation %s exceeded %ss in node %s", run_id,
+                     SCAN_TIMEOUT_SECS, node_name)
+        await _fail_run(run_id, f"Remediation timed out after "
+                                f"{int(SCAN_TIMEOUT_SECS)}s", "timeout")
+    except LLMUnavailableError as exc:
+        logger.error("Remediation %s: no language model: %s", run_id, exc)
+        await _fail_run(run_id, f"{exc.reason} Remediation could not run.",
+                        "llm_unavailable")
+    except asyncio.CancelledError:
+        await _fail_run(run_id, "The backend shut down while this "
+                                "remediation was running. It did not "
+                                "complete.", "interrupted",
+                        status=ss.INTERRUPTED)
+        raise
+    except Exception:
+        # Internal exception text stays in the server log, not the client.
+        logger.exception("Remediation %s crashed after node %s", run_id,
+                         node_name)
+        await _fail_run(run_id, "Remediation failed due to an internal "
+                                "error. See server logs.", "internal")
     finally:
+        beat.cancel()
         cleanup_repo(run_id)
-        await queue.put(None)
+        await _publish(run_id, None)
 
 
 @app.post("/api/remediate", response_model=ScanResponse, status_code=201)
-async def start_remediation(req: RemediateRequest) -> ScanResponse:
-    """Re-run coder→tester→PR-creator from a saved state_after_fix.json."""
+async def start_remediation(req: RemediateRequest,
+                            response: Response) -> ScanResponse:
+    """Resume the remediation workflow from validated saved progress.
+
+    Accepts either the original scan id (``d97e9820``) or an interrupted
+    remediation attempt (``d97e9820-r1``): the snapshot always comes from
+    the parent scan, while the resume entry (secure_coder / reviewer /
+    tester / pr_creator) is decided from the newest validated prior
+    attempt. Never restarts the full scan pipeline (no re-clone for
+    analysis, no Semgrep/Bandit re-scan, no Orchestrator).
+    """
     from agents.remediation.loop import fresh_remediation_state
+    from agents.remediation.resume import (decide_resume, is_remediation_id,
+                                           load_prior_progress, parent_id_for)
     from tools.run_artifacts import load_state_snapshot
 
+    parent_id = parent_id_for(req.scan_id)
     try:
-        snapshot = load_state_snapshot(req.scan_id)
+        snapshot = load_state_snapshot(parent_id)
     except FileNotFoundError:
         raise HTTPException(status_code=404,
                             detail=f"No saved state for scan {req.scan_id}")
     if not snapshot.get("repo_url"):
         raise HTTPException(status_code=422,
                             detail="Snapshot has no repo_url")
-    n = 1 + sum(1 for sid in _scans if sid.startswith(f"{req.scan_id}-r"))
-    run_id = f"{req.scan_id}-r{n}"
+    # One remediation of a given scan at a time: a second click returns the
+    # run already in flight instead of paying for a duplicate LLM/Docker run.
+    # The check is on the parent id so retrying from ``<id>-r1`` does not
+    # start a duplicate ``<id>-r1-r1`` chain.
+    for sid, session in _scans.items():
+        if (sid.startswith(f"{parent_id}-r")
+                and session["status"] not in ("done", "error")):
+            response.status_code = 200
+            return ScanResponse(scan_id=sid, ws_url=f"/ws/{sid}",
+                                status="running", deduplicated=True)
+    _enforce_capacity()
+    n = 1
+    while f"{parent_id}-r{n}" in _scans or _store.get(f"{parent_id}-r{n}"):
+        n += 1
+    run_id = f"{parent_id}-r{n}"
     state = fresh_remediation_state(snapshot, run_id,
                                     target_hint=req.target_hint)
-    _scans[run_id] = {
-        "queue": asyncio.Queue(),
-        "report": None,
-        "status": "starting",
-        "error": None,
-        "repo_url": snapshot.get("repo_url", ""),
-        "started_at": time.time(),
-    }
-    asyncio.create_task(_run_remediation_task(run_id, state))
-    logger.info("Remediation %s started from scan %s (hint=%s)",
-                run_id, req.scan_id, req.target_hint)
+    state["parent_scan_id"] = parent_id
+    # create_pr comes from this explicit request only — never implied by the
+    # original scan. Default False: verify the patch, open no PR.
+    state["create_pr"] = True
+    state["open_pr"] = bool(req.open_pr)
+    # Resume from validated saved progress: the persisted phase may lag
+    # behind the artifacts (e.g. phase secure_coder with review.json already
+    # on disk), so the entry point comes from the artifacts, not the row.
+    hint_run = req.scan_id if is_remediation_id(req.scan_id) else None
+    prior = load_prior_progress(parent_id, hint_run_id=hint_run)
+    decision = decide_resume(snapshot, prior, req.target_hint)
+    entry_point = decision.get("resume_from") or "secure_coder"
+    restored = decision.get("restored") or {}
+    for key, value in restored.items():
+        state[key] = value
+    if entry_point != "secure_coder":
+        state["_resume_reason"] = decision.get("reason", "")
+        state["_resume_source"] = decision.get("source_run")
+    _store.create(run_id, repo_url=snapshot.get("repo_url", ""),
+                  kind="remediation", create_pr=bool(req.open_pr),
+                  target_hint=req.target_hint, parent_scan_id=parent_id)
+    # The durable phase shows the resumed entry immediately, so a client
+    # that polls before the first node update sees Reviewer/Tester — never
+    # a misleading Orchestrator/Scanner restart.
+    _store.mark_running(run_id, entry_point)
+    _scans[run_id] = _new_session(snapshot.get("repo_url", ""))
+    _spawn(_run_remediation_task(run_id, state, entry_point))
+    logger.info("Remediation %s started from scan %s (hint=%s, open_pr=%s, "
+                "resume=%s from %s)",
+                run_id, parent_id, req.target_hint, req.open_pr,
+                entry_point, decision.get("source_run"))
     return ScanResponse(scan_id=run_id, ws_url=f"/ws/{run_id}", status="starting")
 
 
-@app.get("/api/report/{scan_id}")
-async def get_report(scan_id: str) -> dict:
+def _legacy_record(scan_id: str) -> dict | None:
+    """Map an in-memory-only session (no durable row) onto the store shape."""
     scan = _scans.get(scan_id)
     if not scan:
+        return None
+    status = {"done": ss.COMPLETED, "error": ss.FAILED}.get(
+        scan["status"], ss.RUNNING)
+    return {"scan_id": scan_id, "status": status, "phase": scan["status"],
+            "error": scan.get("error"), "error_kind": None,
+            "_report": scan.get("report")}
+
+
+@app.get("/api/report/{scan_id}")
+async def get_report(scan_id: str):
+    """Report contract (see README "Report states"):
+
+    404 unknown id | 202 queued/running (+Retry-After) | 200 report when
+    completed (zero findings is still a report) | 200 {"status":"error"}
+    when failed | 200 {"status":"interrupted"} when the run's process died
+    | 410 when a completed report was purged by retention.
+    """
+    rec = _store.get(scan_id) or _legacy_record(scan_id)
+    if rec is None:
         raise HTTPException(status_code=404, detail="Scan not found")
-    if scan["status"] in ("starting", "scanning", "analyzing", "exploiting", "patching", "reporting"):
-        raise HTTPException(status_code=202, detail=f"Scan in progress: {scan['status']}")
-    if scan["status"] == "error":
+    status = rec["status"]
+    if status in ss.ACTIVE:
+        return JSONResponse(
+            status_code=202,
+            headers={"Retry-After": str(REPORT_RETRY_AFTER_SECS)},
+            content={"status": "running", "phase": rec.get("phase", ""),
+                     "detail": f"Scan in progress: {rec.get('phase') or status}"})
+    if status == ss.FAILED:
         # Fail fast: a crashed node is visible here immediately with the
         # message, instead of hanging the caller on 202s.
         return {"status": "error",
-                "detail": scan.get("error") or "Scan failed — check server logs"}
-    return scan["report"]
+                "detail": rec.get("error") or "Scan failed — check server logs"}
+    if status in (ss.INTERRUPTED, ss.CANCELLED):
+        return {"status": status,
+                "detail": rec.get("error") or "The scan did not complete."}
+    report = rec.get("_report") if "_report" in rec else _store.load_report(rec)
+    if report is None:
+        raise HTTPException(status_code=410,
+                            detail="This scan completed, but its report is "
+                                   "no longer stored (erased by retention).")
+    return report
+
+
+@app.get("/api/scans/{scan_id}/status")
+async def get_scan_status(scan_id: str) -> dict:
+    """Durable lifecycle record for one run (works after restarts)."""
+    rec = _store.get(scan_id)
+    if rec is None:
+        legacy = _legacy_record(scan_id)
+        if legacy is None:
+            raise HTTPException(status_code=404, detail="Scan not found")
+        return {"scan_id": scan_id, "status": legacy["status"],
+                "phase": legacy["phase"], "error": legacy["error"],
+                "has_report": legacy["_report"] is not None}
+    view = ss.public_view(rec)
+    view["live"] = scan_id in _scans and not _scans[scan_id].get("closed")
+    return view
+
+
+@app.get("/api/scans/{scan_id}/events")
+async def get_scan_events(scan_id: str) -> dict:
+    """The agent log feed so far — lets a refreshed page rebuild its log."""
+    if _store.get(scan_id) is None and scan_id not in _scans:
+        raise HTTPException(status_code=404, detail="Scan not found")
+    session = _scans.get(scan_id)
+    events = (list(session.get("events", [])) if session
+              else _store.events(scan_id))
+    return {"scan_id": scan_id,
+            "events": [e for e in events if e.get("type") == "update"]}
+
+
+@app.get("/api/scans/{scan_id}/artifacts/{name}")
+async def get_scan_artifact(scan_id: str, name: str):
+    """One persisted run artifact (patch.diff, review.json, test_*.json …)
+    as plain text. Restricted to files directly inside runs/<scan_id>/."""
+    from fastapi.responses import PlainTextResponse
+    from agents.remediation.report import artifact_path
+    if not _ARTIFACT_NAME_RE.fullmatch(name or ""):
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    path = artifact_path(scan_id, name)
+    if path is None:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    if os.path.getsize(path) > 2 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Artifact too large")
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        return PlainTextResponse(fh.read(),
+                                 headers={"X-Content-Type-Options": "nosniff"})
+
+
+_ARTIFACT_NAME_RE = re.compile(
+    r"[A-Za-z0-9_\-]+\.(diff|json|md|txt|py|jsonl)")
 
 
 @app.get("/api/scans", response_model=list[ScanSummary])
-async def list_scans() -> list[ScanSummary]:
+async def list_scans(limit: int = 50, offset: int = 0) -> list[ScanSummary]:
+    """Recent runs from the durable store (survives restarts), newest first."""
+    limit = max(1, min(limit, 200))
     return [
-        ScanSummary(
-            scan_id=sid,
-            repo_url=data["repo_url"],
-            status=data["status"],
-            started_at=data["started_at"],
-        )
-        for sid, data in sorted(_scans.items(), key=lambda x: x[1]["started_at"], reverse=True)
+        ScanSummary(scan_id=r["scan_id"], repo_url=r["repo_url"],
+                    status=r["status"], started_at=r["created_at"],
+                    kind=r["kind"], phase=r["phase"],
+                    finished_at=r.get("finished_at"),
+                    error=r.get("error"))
+        for r in _store.list(limit=limit, offset=max(0, offset))
     ]
 
 
@@ -714,7 +1132,25 @@ async def retention_purge(scan_id: str, mode: str | None = None) -> dict:
     if mode is not None and mode not in (rt.PURGE_FULL, rt.PURGE_PAYLOAD):
         raise HTTPException(status_code=422,
                             detail=f"mode must be {rt.PURGE_FULL} or {rt.PURGE_PAYLOAD}")
-    return await _lifecycle_op(_retention.purge, scan_id, mode)
+    receipt = await _lifecycle_op(_retention.purge, scan_id, mode)
+    # The durable report copy (runs/<id>/report.json + event feed) holds the
+    # same findings; leaving it would make /api/report a purge bypass.
+    if receipt.get("outcome") in ("complete", "partial"):
+        try:
+            erased = _store.forget_report(scan_id)
+        except OSError as exc:
+            logger.error("Purge %s: durable report not erased: %s", scan_id, exc)
+            receipt.setdefault("components", []).append({
+                "component": "run_report", "outcome": rt.C_UNRESOLVED,
+                "detail": "Stored run report could not be deleted."})
+            receipt["outcome"] = "unresolved"
+        else:
+            receipt.setdefault("components", []).append({
+                "component": "run_report",
+                "outcome": rt.C_DONE if erased else rt.C_ABSENT,
+                "detail": ("All stored run data erased (report, events, patch, review, test results, prompts, and remediation re-runs)."
+                           if erased else "No stored run report existed.")})
+    return receipt
 
 
 @app.post("/api/retention/scans/{scan_id}/hold")
@@ -822,26 +1258,72 @@ async def health() -> dict:
 # ══════════════════════════════════════════════════════════════
 
 PING_INTERVAL = 30.0   # seconds between keepalive pings
-WS_TIMEOUT    = 600.0  # max seconds to wait for a queue message before giving up
+# Max lifetime of one scan-feed socket: outlives the scan's own deadline.
+WS_TIMEOUT    = SCAN_TIMEOUT_SECS + 120.0
 
 @app.websocket("/ws/{scan_id}")
 async def ws_scan_feed(websocket: WebSocket, scan_id: str) -> None:
-    if scan_id not in _scans:
-        await websocket.close(code=4004, reason="Scan not found")
+    session = _scans.get(scan_id)
+    if session is None:
+        # Not running in this process. A finished run (even from before a
+        # restart) is answered from the durable store so a refreshed page
+        # still gets its result; anything else is closed with 4004 and the
+        # client falls back to REST polling of /api/report.
+        rec = _store.get(scan_id)
+        if rec is None or rec["status"] in ss.ACTIVE:
+            await websocket.close(code=4004, reason="Scan not live here")
+            return
+        await websocket.accept()
+        try:
+            for event in _store.events(scan_id):
+                await websocket.send_json(event)
+            if rec["status"] == ss.COMPLETED:
+                report = _store.load_report(rec)
+                if report is not None:
+                    await websocket.send_json({"type": "done",
+                                               "scan_id": scan_id,
+                                               "report": report})
+                else:
+                    await websocket.send_json({
+                        "type": "error", "scan_id": scan_id,
+                        "kind": "report_unavailable",
+                        "message": "The report is no longer stored."})
+            else:
+                await websocket.send_json({
+                    "type": "error", "scan_id": scan_id,
+                    "kind": rec.get("error_kind") or rec["status"],
+                    "message": rec.get("error") or "The scan did not complete."})
+        except WebSocketDisconnect:
+            pass
+        finally:
+            await _close_quietly(websocket, f"scan {scan_id} (replay)")
         return
 
     await websocket.accept()
     logger.info("WS client connected for scan %s", scan_id)
 
-    queue: asyncio.Queue = _scans[scan_id]["queue"]
+    queue: asyncio.Queue = asyncio.Queue()
+    # Replay what this client missed, then follow live. Snapshot + subscribe
+    # happen with no await in between, so no message is lost or doubled.
+    backlog = list(session.get("events", []))
+    already_closed = session.get("closed", False)
+    session.setdefault("subscribers", set()).add(queue)
+    for event in backlog:
+        await queue.put(event)
+    if already_closed:
+        await queue.put(None)
     deadline = time.monotonic() + WS_TIMEOUT
 
     try:
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                logger.warning("Scan %s timed out", scan_id)
-                await websocket.send_json({"type": "error", "message": "Scan timed out", "scan_id": scan_id})
+                # The socket's own lifetime ended, not the scan: never claim
+                # the scan failed. The client re-checks /api/report.
+                logger.warning("WS for scan %s hit its %ss lifetime", scan_id,
+                               WS_TIMEOUT)
+                await websocket.send_json({"type": "stream_timeout",
+                                           "scan_id": scan_id})
                 break
 
             try:
@@ -865,6 +1347,7 @@ async def ws_scan_feed(websocket: WebSocket, scan_id: str) -> None:
     except Exception as exc:
         logger.error("WS error for scan %s: %s", scan_id, exc)
     finally:
+        session.get("subscribers", set()).discard(queue)
         await _close_quietly(websocket, f"scan {scan_id}")
         logger.info("WS connection closed for scan %s", scan_id)
 

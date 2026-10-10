@@ -66,6 +66,8 @@ User-Agent header.
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import logging
 import os
 import re
@@ -350,6 +352,21 @@ def _cloud_configured() -> bool:
             or _openrouter_configured())
 
 
+# Per-call reasoning effort (set by the SecureCoder for fix attempts).
+# Honoured by gpt-oss on Groq and by Gemini; other models ignore it.
+_reasoning_effort: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "llm_reasoning_effort", default=None)
+
+
+@contextlib.contextmanager
+def reasoning_effort(level: str | None):
+    token = _reasoning_effort.set(level)
+    try:
+        yield
+    finally:
+        _reasoning_effort.reset(token)
+
+
 # ── LLM constructors ──────────────────────────────────────────────────────────
 
 # The model + key the zero-arg _build_groq() binds (set by the iteration loop).
@@ -378,10 +395,18 @@ def _build_groq():
 
     class _GroqClient:
         def invoke(self, messages):
-            resp = client.chat.completions.create(
-                model=model,
-                messages=_to_oai_messages(messages),
-            )
+            kwargs: dict = {"model": model, "messages": _to_oai_messages(messages)}
+            effort = _reasoning_effort.get()
+            if effort and "gpt-oss" in model:
+                try:
+                    resp = client.chat.completions.create(
+                        **kwargs, reasoning_effort=effort)
+                except Exception as exc:
+                    if not _mentions_reasoning_param(exc):
+                        raise
+                    resp = client.chat.completions.create(**kwargs)
+            else:
+                resp = client.chat.completions.create(**kwargs)
             text = (resp.choices[0].message.content or "") if resp.choices else ""
             return _Reply(strip_reasoning(text), provider="groq", model=model)
 
@@ -412,7 +437,7 @@ def _oai_chat(provider: str, model: str, messages: list) -> _Reply:
             resp = client.chat.completions.create(
                 model=model,
                 messages=oai_messages,
-                extra_body={"reasoning_effort": "low"},
+                extra_body={"reasoning_effort": _reasoning_effort.get() or "low"},
             )
             text = (resp.choices[0].message.content or "") if resp.choices else ""
         except Exception as exc:
