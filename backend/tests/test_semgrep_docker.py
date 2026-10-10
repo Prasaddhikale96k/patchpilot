@@ -53,7 +53,7 @@ def _dispatcher(monkeypatch, calls, native_json=None, docker_json=None,
             return _FakeCompleted(0, "Pulled", "")
         if cmd and cmd[0] == "docker":
             assert "--name" in cmd and "-v" in cmd and "-w" in cmd
-            assert cmd[-5:] == ["--json", "--quiet", "--timeout", "30", "."]
+            assert cmd[-1] == "." and "--json" in cmd and "--quiet" in cmd and "--metrics=off" in cmd
             return _FakeCompleted(1 if docker_json else 0, docker_json or "", "")
         return _FakeCompleted(0, native_json or "", "")
     monkeypatch.setattr(semgrep_runner.subprocess, "run", fake_run)

@@ -19,6 +19,7 @@ _BATCH_SIZE = 6
 _MAX_FILES = 80
 _MAX_FILE_BYTES = 200_000
 _MAX_HANDLER_LINES = 120
+_MAX_IN_FLIGHT = 3   # concurrent LLM batches
 
 _SKIP_DIRS = {"tests", "test", ".venv", "venv", "node_modules", ".git",
               "__pycache__", "instance", ".pytest_cache"}
@@ -220,36 +221,36 @@ def _validate(repo_path: str, handlers: list[dict],
     return valid
 
 
-def logic_auditor_node(state: dict) -> dict:
-    """Audit route handlers for logic flaws; append valid findings."""
-    from ..llm_router import LLMUnavailableError, llm_pool
+def audit_repo(repo_path: str) -> dict:
+    """Run the LLM audit on a cloned repo: {"findings": [...], "logs": [...]}.
 
-    repo_path = state.get("repo_path", "")
-    tech_type = (state.get("tech_stack", {}) or {}).get("type")
-    if tech_type == "website" or not repo_path or not os.path.isdir(repo_path):
-        return {"agent_logs": [
-            "[LogicAuditor] Skipped (website scan — no source to audit)."]}
+    Needs only the clone (not scanner output), so the scanner can run it
+    concurrently with Bandit and Semgrep. Batches go through the LLM pool.
+    """
+    from ..llm_router import LLMUnavailableError, llm_pool
 
     handlers = find_handlers(repo_path)
     if not handlers:
-        return {"agent_logs": ["[LogicAuditor] Audited 0 routes → 0 issues."]}
+        return {"findings": [],
+                "logs": ["[LogicAuditor] Audited 0 routes → 0 issues."]}
 
     batches = [handlers[i:i + _BATCH_SIZE]
                for i in range(0, len(handlers), _BATCH_SIZE)]
     try:
-        batch_results = llm_pool.map(batches, fn=_audit_batch)
+        batch_results = llm_pool.map(batches, fn=_audit_batch,
+                                     max_workers=_MAX_IN_FLIGHT)
     except LLMUnavailableError as exc:
-        return {"agent_logs": [f"[LogicAuditor] LLM unavailable: {exc.reason}"]}
+        return {"findings": [],
+                "logs": [f"[LogicAuditor] LLM unavailable: {exc.reason}"]}
     except Exception as exc:
         logger.exception("LogicAuditor failed")
-        return {"agent_logs": [f"[LogicAuditor] ERROR: {exc}"]}
+        return {"findings": [], "logs": [f"[LogicAuditor] ERROR: {exc}"]}
 
     raw: list[dict] = []
     for batch in batch_results:
         raw.extend(batch or [])
     valid = _validate(repo_path, handlers, raw)
 
-    merged = list(state.get("raw_findings", [])) + valid
     _cwe_short = {"CWE-639": "IDOR", "CWE-22": "path traversal",
                   "CWE-306": "missing auth"}
     shorts = ", ".join(
@@ -261,4 +262,24 @@ def logic_auditor_node(state: dict) -> dict:
             + (f" ({shorts})" if shorts else "")
             + (f" ({len(raw) - len(valid)} dropped in validation)"
                if len(raw) > len(valid) else "")]
-    return {"raw_findings": merged, "agent_logs": logs}
+    return {"findings": valid, "logs": logs}
+
+
+def logic_auditor_node(state: dict) -> dict:
+    """Audit route handlers for logic flaws; append valid findings.
+
+    With PARALLEL_AGENTS the scanner already ran the audit concurrently and
+    left it in state["logic_audit"]; this node then only merges it.
+    """
+    repo_path = state.get("repo_path", "")
+    tech_type = (state.get("tech_stack", {}) or {}).get("type")
+    if tech_type == "website" or not repo_path or not os.path.isdir(repo_path):
+        return {"agent_logs": [
+            "[LogicAuditor] Skipped (website scan — no source to audit)."]}
+
+    result = state.get("logic_audit") or audit_repo(repo_path)
+    findings = result.get("findings", [])
+    out: dict = {"agent_logs": list(result.get("logs", []))}
+    if findings:
+        out["raw_findings"] = list(state.get("raw_findings", [])) + findings
+    return out

@@ -84,20 +84,52 @@ def _relative(path: str, repo_path: str) -> str:
         if cleaned.startswith(prefix):
             cleaned = cleaned[len(prefix):]
             break
-    cleaned = cleaned.lstrip("./")
-    if not cleaned:
-        return cleaned
-    if os.path.isabs(cleaned):
-        try:
-            return os.path.relpath(cleaned, repo_path).replace("\\", "/")
-        except ValueError:
-            return cleaned
-    if os.path.isabs(path):
-        try:
-            return os.path.relpath(path, repo_path).replace("\\", "/")
-        except ValueError:
-            return cleaned
-    return cleaned
+    from tools.repo_paths import normalize_repo_path
+    if cleaned.startswith("./"):
+        cleaned = cleaned[2:]
+    if os.path.isabs(path) and not path.replace("\\", "/").startswith("/src/"):
+        return normalize_repo_path(path, repo_path)
+    return normalize_repo_path(cleaned, repo_path)
+
+
+_BUNDLED_RULES = Path(__file__).resolve().parent.parent / "rules"
+
+
+def _fast_mode() -> bool:
+    """PARALLEL_AGENTS=0 restores the old path (registry rules, no speed flags)."""
+    return os.getenv("PARALLEL_AGENTS", "1").strip().lower() not in ("0", "false", "no", "off")
+
+
+def _bundled_rules_dir() -> str | None:
+    """backend/rules/*.yml (python, flask, secrets), downloaded once, so a
+    scan never re-fetches rulesets from the registry. None if missing."""
+    if not _fast_mode():
+        return None
+    if _BUNDLED_RULES.is_dir() and any(_BUNDLED_RULES.glob("*.yml")):
+        return str(_BUNDLED_RULES)
+    return None
+
+
+def _rules_dir() -> str | None:
+    """Local rules directory: SEMGREP_RULES_PATH, else the bundled rules."""
+    local = os.getenv("SEMGREP_RULES_PATH", "").strip()
+    if local and os.path.isdir(os.path.expanduser(local)):
+        return os.path.expanduser(local)
+    return _bundled_rules_dir()
+
+
+def _speed_flags() -> list[str]:
+    """Fast, offline-friendly flags; test and vendor dirs are skipped."""
+    if not _fast_mode():
+        return []
+    flags = ["--metrics=off", "--jobs", "4", "--timeout", "20"]
+    skip = ["node_modules", ".venv", "venv"]
+    from tools.scan_exclusions import include_tests
+    if not include_tests():
+        skip = ["tests"] + skip
+    for name in skip:
+        flags += ["--exclude", name]
+    return flags
 
 
 def _semgrep_config() -> str:
@@ -112,12 +144,7 @@ def _semgrep_config() -> str:
         git clone --depth 1 https://github.com/semgrep/semgrep-rules ~/.semgrep-rules
         SEMGREP_RULES_PATH=~/.semgrep-rules
     """
-    local = os.getenv("SEMGREP_RULES_PATH", "").strip()
-    if local:
-        expanded = os.path.expanduser(local)
-        if os.path.isdir(expanded):
-            return expanded
-    return "auto"
+    return _rules_dir() or "auto"
 
 
 def _parse_results(stdout: str, repo_path: str) -> list[dict]:
@@ -176,7 +203,7 @@ def _ensure_docker_image() -> bool:
     return True
 
 
-def _run_docker(repo_path: str) -> list[dict]:
+def _run_docker(repo_path: str, files: list[str] | None = None) -> list[dict]:
     global last_mode
     # Docker Desktop accepts C:/… paths; backslashes confuse the daemon
     # (verified: -v "C:\\…:/t:ro" fails, -v "C:/…:/t:ro" mounts fine).
@@ -187,14 +214,15 @@ def _run_docker(repo_path: str) -> list[dict]:
            # Persist the registry-rules cache across scans: without it every
            # Docker run re-downloads the ruleset (~1 min of the scan time).
            "-v", "semgrep-cache:/root/.semgrep"]
-    rules = os.getenv("SEMGREP_RULES_PATH", "").strip()
-    if rules and os.path.isdir(os.path.expanduser(rules)):
-        cmd += ["-v", f"{Path(os.path.expanduser(rules)).resolve().as_posix()}:/rules:ro"]
+    rules = _rules_dir()
+    if rules:
+        cmd += ["-v", f"{Path(rules).resolve().as_posix()}:/rules:ro"]
         config = "/rules"
     else:
         config = "auto"
     cmd += [SEMGREP_IMAGE, "semgrep", "scan", "--config", config,
-            "--json", "--quiet", "--timeout", "30", "."]
+            "--json", "--quiet", *_speed_flags(),
+            *([f"/src/{f}" for f in files] if files else ["."])]
     try:
         # nosec B603 - fixed argument list, no shell.
         result = subprocess.run(  # nosec B603
@@ -218,37 +246,48 @@ def _run_docker(repo_path: str) -> list[dict]:
     return _parse_results(result.stdout, repo_path)
 
 
-def _run_native(repo_path: str) -> list[dict]:
+def _run_native(repo_path: str, files: list[str] | None = None) -> list[dict]:
     global last_mode
+    cmd = [_semgrep_bin(), "--config", _semgrep_config()]
+    kwargs: dict = {}
+    if files:
+        # Relative targets with cwd=repo keep output paths repo-relative,
+        # comparable with full-scan findings.
+        cmd += [f.replace("\\", "/") for f in files]
+        kwargs["cwd"] = repo_path
+    else:
+        cmd += [repo_path]
+    cmd += ["--json", "--quiet", *_speed_flags()]
     # nosec B603 - resolved executable, fixed argument list, no shell.
     result = subprocess.run(  # nosec B603
-        [_semgrep_bin(), "--config", _semgrep_config(), repo_path,
-         "--json", "--quiet"],
+        cmd,
         capture_output=True,
         text=True,
         timeout=180,
+        **kwargs,
     )
     last_mode = "native"
     return _parse_results(result.stdout, repo_path)
 
 
-def run_semgrep(repo_path: str) -> list[dict]:
+def run_semgrep(repo_path: str, files: list[str] | None = None) -> list[dict]:
+    """Scan the repo (or only `files`, repo-relative) with Semgrep."""
     mode = _semgrep_mode()
     if mode == "native":
-        return _run_native(repo_path)
+        return _run_native(repo_path, files)
     if mode == "docker":
         if not _docker_available():
             raise RuntimeError("Semgrep unavailable: start Docker Desktop "
                                "or set SEMGREP_MODE=native")
         _ensure_docker_image()
-        return _run_docker(repo_path)
+        return _run_docker(repo_path, files)
     # auto: native binary first, Docker second, clear error otherwise.
     try:
-        return _run_native(repo_path)
+        return _run_native(repo_path, files)
     except Exception as native_exc:
         logger.debug("native semgrep unavailable (%s), trying Docker", native_exc)
         if not _docker_available():
             raise RuntimeError("Semgrep unavailable: install it in WSL "
                                "or start Docker Desktop") from native_exc
         _ensure_docker_image()
-        return _run_docker(repo_path)
+        return _run_docker(repo_path, files)
